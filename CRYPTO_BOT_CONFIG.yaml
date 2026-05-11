@@ -4,8 +4,8 @@
 # Strategy: Base coin accumulation + micro-cap alpha
 
 account:
-  initial_capital_usd: 1000.0
-  current_capital_usd: 1000.0
+  starting_balance_usd: 1000.0
+  current_balance_usd: 1000.0
   max_risk_per_trade_pct: 2.0
   max_open_positions: 5
   max_daily_loss_usd: 50.0

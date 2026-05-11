@@ -1,0 +1,68 @@
+# Hermes Crypto Trading Bot Configuration
+# Mode: paper (simulated) → flip to LIVE_MODE=true for real trades
+
+account:
+  initial_capital_usd: 1000.0
+  max_open_positions: 5
+  max_daily_loss_usd: 50.0
+  max_drawdown_pct: 10.0
+  max_consecutive_losses: 3
+  cooldown_hours: 4
+  min_trade_size_usd: 10.0
+  max_trade_size_usd: 200.0
+  risk_per_trade_pct: 2.0
+
+strategy:
+  mode: paper
+  chain: solana
+  dex_sources:
+    - dexscreener
+    - pumpfun
+    - birdeye
+  filters:
+    min_liquidity_usd: 10000
+    min_volume_24h_usd: 5000
+    max_age_hours: 72
+    exclude_mint_authority: true
+    exclude_freeze_authority: true
+    min_holders: 50
+  entry:
+    min_score: 65
+    momentum_lookback_minutes: 15
+    volume_spike_threshold: 2.5
+  exit:
+    stop_loss_pct: 15.0
+    time_stop_hours: 72
+    trailing_activation_pct: 100.0
+    trailing_distance_pct: 20.0
+  tiers:
+    - { pct: 25, target_r: 2 }
+    - { pct: 25, target_r: 5 }
+    - { pct: 25, target_r: 10 }
+    - { pct: 15, target_r: 50 }
+    - { pct: 10, target_r: trail }
+
+scheduler:
+  discovery_interval_sec: 45
+  monitor_interval_sec: 10
+  report_interval_sec: 300
+  save_interval_sec: 60
+
+alerts:
+  telegram: true
+  on_entry: true
+  on_exit: true
+  on_stop_loss: true
+  on_daily_summary: true
+  on_drawdown_alert: true
+
+profit_protection:
+  enabled: false
+  profit_transfer_pct: 50
+  cold_storage_address: ""
+  threshold_usd: 100
+
+logging:
+  level: INFO
+  max_log_size_mb: 10
+  backup_count: 3

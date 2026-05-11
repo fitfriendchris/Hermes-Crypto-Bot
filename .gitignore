@@ -1,7 +1,33 @@
+# Secrets — NEVER commit
 .env
-*.log
-bot_state.json
+*.pem
 *.key
-venv/
+
+# Bot state (contains wallet addresses)
+bot_state.json
+
+# Logs — can contain sensitive data
+crypto_bot.log
+*.log
+
+# Python
 __pycache__/
+*.pyc
+*.pyo
+*.egg-info/
+dist/
+build/
+
+# Virtual env
+venv/
+.venv/
+
+# IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+
+# OS
 .DS_Store
+Thumbs.db

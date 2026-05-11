@@ -1,292 +1,276 @@
-# CRYPTO BOT CONFIGURATION
-## Account: Chris (yuhfriendchris)
-## Capital: $100 starting
-## Strategy: Aggressive micro-cap growth with major coin anchors
-## Risk: High — micro-caps, memes, Pump.fun coins
-## Generated: 2026-05-11 00:32 CDT
+# Hermes Crypto Bot — Solana Base Coins + BTC Hedge
+# Purpose: Fund Sovereign businesses through crypto trading
+# Chain: Solana primary, BTC as hedge anchor
+# Strategy: Base coin accumulation + micro-cap alpha
 
-# CRYPTO BOT CONFIGURATION
-## Account: Chris (yuhfriendchris)
-## Capital: $100 starting
-## Strategy: Aggressive micro-cap growth with major coin anchors
-## Risk: High — micro-caps, memes, Pump.fun coins
-## Legal: March 2026 SEC/CFTC Release 33-11412 compliant
-## Generated: 2026-05-11 00:32 CDT
-
-# COMPLIANCE SECTION
-# March 17, 2026: SEC/CFTC jointly published Release 33-11412
-# Effective March 23, 2026. Supersedes 2019 FinHub Framework.
-# Key changes:
-#   - "Most crypto assets are NOT themselves securities"
-#   - 16 named digital commodities (BTC, ETH, SOL, XRP, XLM legal)
-#   - Investment contracts can END (tokens mature out of securities status)
-#   - Safe harbours: staking, mining, airdrops, wrapping
-#   - Interpretive release, not statute
-# This bot trades ONLY the 16 named digital commodities + DEX micro-caps
-# DEX trading is self-custody (no exchange intermediary)
-# Operator bears responsibility for tax reporting (1099-K from exchanges)
-# Bot is automation tool, not investment advice
-# NOT FINANCIAL ADVICE
-
-compliance:
-  sec_cftc_release: "33-11412"
-  effective_date: "2026-03-23"
-  legal_basis: "digital_commodity"
-  named_commodities: [BTC, ETH, SOL, XRP, XLM, LTC, BCH, ADA, DOT, MATIC, AVAX, ALGO, LINK, UNI, ATOM]
-  jurisdiction: "US_Texas"
-  operator_tax_obligation: true
-  disclaimer: "This bot is an automation tool. The operator makes all trading decisions. Past performance does not guarantee future results. Cryptocurrency trading carries substantial risk of loss."
-  
 account:
-  starting_balance_usd: 100.00
-  current_balance_usd: 100.00
-  max_risk_per_trade: 0.10        # 10% of balance (aggressive)
-  max_open_positions: 8           # Diversified micro-cap hunting
-  max_drawdown_pct: 0.25          # Pause at 25% DD (high tolerance)
-  min_trade_size_usd: 5.00        # $5 minimum (fractions of pennies ok)
-  compound: true                  # Reinvest profits
+  initial_capital_usd: 1000.0
+  current_capital_usd: 1000.0
+  max_risk_per_trade_pct: 2.0
+  max_open_positions: 5
+  max_daily_loss_usd: 50.0
+  max_drawdown_pct: 10.0
+  max_consecutive_losses: 3
+  cooldown_hours: 4
+  min_trade_size_usd: 10.0
+  max_trade_size_usd: 200.0
+  compound: true
 
-# PROFIT PROTECTION
-# Move portion of profits to cold storage automatically
-profit_protection:
+chain:
+  primary: solana
+  secondary: ethereum
+  btc_hedge: true
+
+# SOLANA BASE COINS — Established, liquid, lower rug risk
+base_coins:
+  tier_1:  # Majors — 60% allocation
+    - symbol: SOL
+      allocation_pct: 25
+      type: native
+      min_holding_usd: 250
+    - symbol: USDC
+      allocation_pct: 20
+      type: stable
+      min_holding_usd: 200
+    - symbol: JUP
+      allocation_pct: 15
+      type: dex_token
+      min_holding_usd: 150
+  
+  tier_2:  # Growth — 25% allocation
+    - symbol: JTO
+      allocation_pct: 8
+      type: infrastructure
+    - symbol: RAY
+      allocation_pct: 7
+      type: dex_token
+    - symbol: ORCA
+      allocation_pct: 5
+      type: dex_token
+    - symbol: BONK
+      allocation_pct: 5
+      type: meme
+  
+  tier_3:  # Micro-cap alpha — 15% allocation
+    discovery: true
+    max_allocation_pct: 3
+    max_positions: 3
+    sources:
+      - dexscreener
+      - birdeye
+      - pumpfun
+
+# BTC HEDGE — Anchor against SOL ecosystem drawdown
+btc_hedge:
   enabled: true
-  cold_wallet_sol: ""        # PASTE SOL ADDRESS HERE (public)
-  cold_wallet_eth: ""        # PASTE ETH ADDRESS HERE (public)
-  transfer_threshold_usd: 50   # Transfer when accumulated profit >= $50
-  transfer_pct: 0.25            # Move 25% to cold, keep 75% for reinvest
-  weekly_sweep: true            # Also sweep on Mondays if weekly PnL > threshold
-
-# SECURITY NOTICE
-# Private keys are NEVER stored in this file.
-# Create .env file locally with:
-#   PHANTOM_PRIVATE_KEY=your_phantom_key_here
-#   METAMASK_PRIVATE_KEY=your_metamask_key_here
-#   BINANCE_API_KEY=your_binance_key_here
-#   BINANCE_API_SECRET=your_binance_secret_here
-#   TELEGRAM_BOT_TOKEN=your_telegram_token_here
-#   TELEGRAM_CHAT_ID=your_chat_id_here
-# .env is in .gitignore — never committed to version control.
-
-# WHALE TRACKING SOURCES
-# March 2026 compliant APIs (public blockchain data, no insider info)
-whale_apis:
-  etherscan:
-    endpoint: "https://api.etherscan.io/api"
-    rate_limit: "5 req/sec"
-    cost: "free"
-    data_type: "public_onchain"
-    legal: "public_blockchain_data"
-  
-  bscscan:
-    endpoint: "https://api.bscscan.com/api"
-    rate_limit: "5 req/sec"
-    cost: "free"
-    data_type: "public_onchain"
-    legal: "public_blockchain_data"
-  
-  solscan:
-    endpoint: "https://public-api.solscan.io"
-    rate_limit: "10 req/sec"
-    cost: "free"
-    data_type: "public_onchain"
-    legal: "public_blockchain_data"
-  
-  dexscreener:
-    endpoint: "https://api.dexscreener.com/latest/dex"
-    rate_limit: "unlimited"
-    cost: "free"
-    data_type: "public_dex_data"
-    legal: "public_market_data"
-  
-  pumpfun:
-    endpoint: "https://frontend-api.pump.fun"
-    rate_limit: "unknown"
-    cost: "free"
-    data_type: "public_launch_data"
-    legal: "public_platform_data"
-  
-  arkham:
-    endpoint: "https://api.arkhamintelligence.com"
-    rate_limit: "100 req/day"
-    cost: "free_tier"
-    data_type: "public_wallet_labels"
-    legal: "public_blockchain_data"
-  
-  birdeye:
-    endpoint: "https://public-api.birdeye.so"
-    rate_limit: "unknown"
-    cost: "free"
-    data_type: "public_solana_dex"
-    legal: "public_market_data"
-
-# RISK FILTER APIS
-risk_apis:
-  token_sniffer:
-    endpoint: "https://tokensniffer.com/api"
-    cost: "free"
-    data_type: "contract_analysis"
-    legal: "public_contract_data"
-  
-  honeypot_is:
-    endpoint: "https://honeypot.is"
-    cost: "free"
-    data_type: "contract_safety"
-    legal: "public_contract_data"
-  
-  bubblemaps:
-    endpoint: "https://api.bubblemaps.io"
-    cost: "free"
-    data_type: "holder_distribution"
-    legal: "public_onchain_data"
-  
-  certik_skynet:
-    endpoint: "https://skynet.certik.com/api"
-    cost: "free"
-    data_type: "security_score"
-    legal: "public_audit_data"
+  allocation_pct: 10
+  trigger: sol_btc_ratio_drop  # Add BTC when SOL/BTC ratio drops 10%
+  instrument: btc_perp  # Use BTC-PERP on Drift or similar
+  rebalance_threshold_pct: 5
 
 execution:
-  exchange: binance               # Primary for majors
-  dex_primary: jupiter            # For SOL memes
-  dex_secondary: raydium          # Backup DEX
-  dex_scanner: dexscreener        # For micro-cap discovery
-  pumpfun: true                   # Monitor pump.fun launches
-  use_websocket: true
-  max_slippage_pct: 0.03          # 3% for micro-caps (tolerable)
-  latency_target_ms: 1000         # 1s acceptable for micro-caps
-  gas_priority: high              # Fast execution on DEX
+  dex_primary: jupiter
+  dex_secondary: raydium
+  dex_tertiary: orca
+  aggregator: jupiter  # Best Solana prices
+  max_slippage_pct: 0.01  # 1% max for base coins
+  latency_target_ms: 500
+  gas_priority: high
+  use_priority_fees: true
+  priority_fee_micro_lamports: 10000
 
 risk_filter:
-  # Micro-cap adjusted scoring
-  min_scam_score: 40              # Lower threshold (micro-caps riskier)
+  min_liquidity_usd: 100000  # $100K minimum for base coins
+  min_volume_24h_usd: 50000  # $50K daily
+  max_holder_concentration: 0.30  # Top 10 < 30%
   require_liquidity_locked: true
-  require_audit: false            # Most micro-caps unaudited
-  max_holder_concentration: 0.50  # Top 10 < 50% (micro-cap reality)
-  min_volume_24h: 10000           # $10K daily ok for micro
-  min_liquidity_usd: 5000         # $5K liquidity minimum
-  max_contract_age_days: 7          # Allow fresh launches
+  require_audit: true  # Audited only for base coins
+  max_contract_age_days: 30
   
   # Rug pull detection
   honey_pot_check: true
   mint_function_check: true
   ownership_renounced_check: true
-  lp_burned_check: true           # LP must be burned or locked
-  dev_wallet_sell_check: true     # Flag dev selling
+  lp_burned_check: true
+  dev_wallet_sell_check: true
+  
+  # Whale tracking
+  whale_min_trade_usd: 10000
+  whale_track_count: 20
 
-ict:
-  enabled: true
-  timeframes: ["5m", "15m", "1h", "4h"]
-  require_bos: false              # Micro-caps too volatile
-  require_fvg: false
-  require_liquidity_sweep: false
-  use_volume_profile: true
-  use_market_structure: true
+strategy:
+  # Base coin accumulation — DCA style
+  dca:
+    enabled: true
+    interval_hours: 24
+    amount_usd: 20
+    coins: [SOL, JUP, JTO]
+  
+  # Momentum strategy for tier 2
+  momentum:
+    enabled: true
+    timeframe: 4h
+    lookback_periods: 6
+    min_volume_spike: 2.0
+    entry_confidence: 70
+  
+  # Arbitrage between DEXs
+  arbitrage:
+    enabled: true
+    min_profit_pct: 0.5
+    max_slippage_pct: 0.5
+    sources: [jupiter, raydium, orca]
+  
+  # Yield farming for stablecoins
+  yield:
+    enabled: true
+    platforms: [kamino, marginfi, drift]
+    min_apy_pct: 5
+    max_risk_score: 3
 
 stop_loss:
-  method: smart                   # structure > whale > fvg > liquidity > atr
-  fixed_pct: 0.15                 # 15% hard max for micro-caps
-  atr_multiplier: 3.0             # Wider for volatility
-  trail_after_r: 2.0
-  
-  # Micro-cap specific
-  time_stop_hours: 72             # 3 day max hold
-  momentum_stop: true             # Exit if volume drops 50%
-  liquidity_collapse_stop: true   # Exit if liquidity drops 30%
-  dev_sell_stop: true             # Exit if dev wallet sells >5%
+  method: smart
+  fixed_pct: 8.0  # Tighter for base coins
+  atr_multiplier: 2.5
+  trail_after_r: 1.5
+  time_stop_hours: 48
 
 take_profit:
-  method: tiered                  # Tiered exit strategy
-  risk_reward_ratio: 5.0          # 5:1 minimum (micro-cap targets)
-  
-  # Tiered exit for runners
-  tier_1_r: 2.0                   # Sell 25% at 2R
-  tier_2_r: 5.0                   # Sell 25% at 5R
-  tier_3_r: 10.0                  # Sell 25% at 10R
-  tier_4_r: 50.0                  # Sell 15% at 50R (moon bag)
-  final_trail_pct: 0.20           # Trail final 10% at 20% below peak
-  
-  # Market cap milestones
-  mc_target_1: 1000000            # $1M MC — consider partial exit
-  mc_target_2: 10000000            # $10M MC — consider major exit
-  mc_target_3: 50000000            # $50M MC — likely full exit
+  method: tiered
+  risk_reward_ratio: 3.0
+  tier_1_r: 1.5  # Sell 30% at 1.5R
+  tier_2_r: 3.0  # Sell 30% at 3R
+  tier_3_r: 5.0  # Sell 20% at 5R
+  final_trail_pct: 15.0  # Trail final 20% at 15% below peak
 
-coin_selection:
-  # Major anchors (stability)
-  majors:
-    - BTC
-    - ETH
-    - SOL
-    - XRP
-    - XLM
+# PROFIT PROTECTION — Fund Sovereign businesses
+profit_protection:
+  enabled: true
+  cold_wallet_sol: ""  # Fill in your SOL cold wallet
+  transfer_threshold_usd: 100
+  transfer_pct: 0.50  # Send 50% of profits to cold storage
+  weekly_sweep: true
+  sweep_day: monday
   
-  # Micro-cap discovery
-  discovery_sources:
-    - dexscreener                   # Trending pairs
-    - pumpfun                       # New launches
-    - birdeye                       # SOL ecosystem
-    - dextools                      # ETH/BSC pairs
-    - twitter_viral                 # Social signals
-    - whale_wallets                 # Whale accumulation
-  
-  # Filters
-  min_market_cap: 10000            # $10K minimum
-  max_market_cap: 10000000        # $10M maximum (micro-cap zone)
-  min_volume_24h: 5000             # $5K daily
-  require_dex_listed: true
-  max_age_hours: 168               # < 7 days old preferred
+  # Treasury integration
+  treasury_split:
+    operator: 0.50  # 50% to operator
+    reinvest: 0.30  # 30% reinvest
+    war_chest: 0.20  # 20% to Sovereign war chest
 
-whales:
-  track_count: 50                 # Fewer, focused on micro-cap hunters
-  min_score: 60
-  focus: micro_cap_specialists      # Track whales who specialize in micros
-  min_trade_size_usd: 1000         # $1K significant for micro-caps
+# HEDGING
+hedge:
+  enabled: true
+  
+  # BTC hedge against SOL drawdown
+  btc_perp:
+    enabled: true
+    exchange: drift
+    size_pct_of_portfolio: 10
+    trigger_long: sol_btc_ratio_drop_10pct
+    trigger_close: sol_btc_ratio_recover_5pct
+  
+  # Options for catastrophic protection (if available)
+  options:
+    enabled: false  # Requires options DEX (PsyOptions, etc.)
+    platform: psyoptions
+    strike_otm_pct: 10
+    expiry_days: 7
+    premium_budget_pct: 2
+
+# MULTI-SOURCE INTELLIGENCE
+intelligence:
+  # On-chain data
+  birdeye:
+    enabled: true
+    api_tier: free
+  
+  dexscreener:
+    enabled: true
+  
+  # Whale tracking
+  solscan:
+    enabled: true
+    track_wallets:
+      - "H8sMJSCQxfKiWRuNuG5KHr7fFKbQBFK3M6b5fH4R4G2T"  # Example whale
+  
+  # Social signals
+  twitter:
+    enabled: false  # Requires API keys
+    min_mentions: 100
+  
+  # AI4Trade signals
+  ai4trade:
+    enabled: true
+    agent_id: 5953
+    follow_signals: true
+    validate_with_onchain: true
+
+# BACKTESTING
+backtest:
+  enabled: true
+  data_source: birdeye_historical
+  lookback_days: 90
+  walk_forward: true
+  report_metrics:
+    - sharpe_ratio
+    - max_drawdown
+    - win_rate
+    - profit_factor
+    - expectancy
+
+# SCHEDULER
+scheduler:
+  discovery_interval_sec: 60
+  monitor_interval_sec: 10
+  report_interval_sec: 300
+  save_interval_sec: 60
+  dca_interval_hours: 24
+  rebalance_interval_hours: 168  # Weekly
+
+# ALERTS
+alerts:
+  telegram: true
+  on_entry: true
+  on_exit: true
+  on_stop_loss: true
+  on_take_profit: true
+  on_daily_summary: true
+  on_drawdown_alert: true
+  on_profit_transfer: true
 
 logging:
-  level: info
-  telegram_alerts: true
-  daily_report: true
-  pnl_update_interval: 300        # 5 min PnL updates
-
-# AGGRESSIVE GROWTH SETTINGS
-aggressive_mode:
-  enabled: true
-  pyramiding: true                # Add to winners
-  pyramiding_trigger: 2.0         # Add when position up 2R
-  max_pyramid_adds: 2             # Max 2 additions
-  
-  dip_buying: true                # Buy dips on trending coins
-  dip_threshold: 0.20             # Buy 20% dip from local high
-  
-  fomo_override: true             # If 3+ whales buy same new coin in 1h
-  fomo_position_size: 0.15        # 15% on fomo (high risk)
-  
-  ico_presale: false               # NO presales (too risky)
-  airdrop_farming: false           # NO airdrops (time waste)
+  level: INFO
+  file: logs/crypto_bot.log
+  max_size_mb: 10
+  backup_count: 5
 
 # SAFETY CIRCUITS
 safety:
-  max_daily_loss_usd: 25.00        # Stop trading if -$25 day
-  max_weekly_loss_usd: 50.00      # Stop if -$50 week
-  max_consecutive_losses: 5       # Pause after 5 losses
-  cooldown_hours: 24              # 24h cooldown after circuit
+  max_daily_loss_usd: 50
+  max_weekly_loss_usd: 150
+  max_monthly_loss_usd: 300
+  cooldown_after_loss_hours: 24
   
-  # Rug pull emergency
-  instant_exit_signals:
-    - liquidity_removed_50pct
-    - dev_wallet_dump_20pct
-    - contract_upgraded
-    - trading_paused
-    - honeypot_detected
-    - socials_deleted
+  # Circuit breakers
+  circuit_breakers:
+    - name: daily_loss
+      trigger: daily_pnl <= -50
+      action: pause_trading
+    - name: drawdown
+      trigger: max_drawdown_pct >= 10
+      action: close_all_positions
+    - name: sol_crash
+      trigger: sol_price_drop_24h >= 20
+      action: hedge_with_btc_perp
 
 # PERFORMANCE TARGETS
 targets:
-  monthly_growth_pct: 100          # 100% month (double $100 to $200)
-  quarterly_growth_pct: 400       # 4x in 3 months ($100 → $400)
-  annual_growth_pct: 10000        # 100x in year ($100 → $10K)
+  monthly_return_pct: 15
+  max_drawdown_pct: 10
+  sharpe_ratio: 1.5
   
-  # Reality checks
-  expected_win_rate: 0.35         # 35% (micro-cap reality)
-  expected_avg_winner: 5.0         # 5R average win
-  expected_avg_loser: 1.0         # 1R average loss
-  expected_expectancy: 0.75        # Positive expectancy
+  # Business funding goals
+  monthly_profit_target_usd: 150  # $150/month to fund Sovereign
+  quarterly_profit_target_usd: 500
+  annual_profit_target_usd: 2000

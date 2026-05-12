@@ -1,5 +1,5 @@
 {
-  "balance": 69.86035184955965,
+  "balance": 2845.409341454542,
   "positions": {
     "PASTEL": {
       "token": "PASTEL",
@@ -19,7 +19,7 @@
         "4": false
       },
       "highest_price": 1.595e-06,
-      "last_price": 1.201e-06,
+      "last_price": 1.056e-06,
       "score": 75,
       "flags": [
         "brand_new",
@@ -59,20 +59,20 @@
       "address": "0xBb9238fc073BfACd3b252f1b11d7681e9d081ac8",
       "chain": "ethereum",
       "entry": 0.0005879,
-      "quantity": 14810.827052321141,
-      "invested": 8.7072852240596,
-      "stop": 0.000499715,
-      "stop_type": "fixed",
+      "quantity": 11108.120289240856,
+      "invested": 6.5304639180447,
+      "stop": 0.0006466900000000001,
+      "stop_type": "trailing_profit",
       "risk_pct": 0.1500000000000001,
       "opened_at": "2026-05-11T20:32:48.560505",
       "tier_exits": {
-        "1": false,
+        "1": true,
         "2": false,
         "3": false,
         "4": false
       },
-      "highest_price": 0.0005879,
-      "last_price": 0.0005879,
+      "highest_price": 0.7496,
+      "last_price": 0.7459,
       "score": 75,
       "flags": [
         "brand_new",
@@ -83,18 +83,6 @@
     }
   },
   "history": [
-    {
-      "token": "Bufo",
-      "entry": 5.236e-05,
-      "exit": 6.975e-05,
-      "invested": 14.934366818788508,
-      "proceeds": 19.894424858871247,
-      "pnl": 4.960058040082739,
-      "pnl_pct": 0.3321237585943469,
-      "reason": "tier_1_2.0R",
-      "hold_time_hours": 0.0,
-      "highest_price": 6.975e-05
-    },
     {
       "token": "Eileen",
       "entry": 8.178e-05,
@@ -1305,12 +1293,25 @@
       "hold_time_hours": 0.9,
       "highest_price": 3.766e-06,
       "portion": 1.0
+    },
+    {
+      "token": "anon",
+      "entry": 0.0005879,
+      "exit": 0.7496,
+      "invested": 2.1768213060149,
+      "proceeds": 2775.548989604982,
+      "pnl": 2773.372168298967,
+      "pnl_pct": 1274.0467766626978,
+      "reason": "tier_1_2.0R",
+      "hold_time_hours": 5.2,
+      "highest_price": 0.7496,
+      "portion": 0.25
     }
   ],
-  "daily_pnl": 11.935594756563948,
+  "daily_pnl": 2785.3077630555313,
   "trades_today": 120,
-  "consecutive_losses": 6,
+  "consecutive_losses": 0,
   "max_drawdown": 0.185947227395766,
   "total_protected": 0.0,
-  "timestamp": "2026-05-12T01:18:35.396472"
+  "timestamp": "2026-05-12T02:44:14.301225"
 }

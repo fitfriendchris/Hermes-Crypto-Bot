@@ -51,7 +51,7 @@ except ImportError as e:
     print(f"[WARN] Copy trader unavailable: {e}")
 
 try:
-    from HERMES_dex_connector import DEXConnector
+    from dex_connector import DEXConnector
     DEX_OK = True
 except ImportError as e:
     DEX_OK = False
@@ -95,15 +95,21 @@ if LIVE_MODE:
     print("⚠️  LIVE MODE ENABLED — REAL TRADES WILL EXECUTE")
 
 # ── LOGGING ──
-logging.basicConfig(
-    level=getattr(logging, CONFIG['logging']['level'].upper(), logging.INFO),
-    format='%(asctime)s | %(levelname)s | %(message)s',
-    handlers=[
-        logging.FileHandler(os.path.join(_HERE, 'logs', 'HERMES_CRYPTO_BOT.log')),
-        logging.StreamHandler()
-    ]
-)
+log_file = os.path.join(_HERE, 'logs', 'HERMES_CRYPTO_BOT.log')
+log_format = '%(asctime)s | %(levelname)s | %(message)s'
+
+# Create logger with explicit handlers (prevent duplicate root logging)
 logger = logging.getLogger('CryptoBot')
+logger.setLevel(getattr(logging, CONFIG['logging']['level'].upper(), logging.INFO))
+logger.propagate = False  # Don't send to root logger
+
+# Clear any existing handlers to prevent duplicates
+logger.handlers = []
+
+# Add file handler only (console output causes duplicates with nohup)
+file_handler = logging.FileHandler(log_file)
+file_handler.setFormatter(logging.Formatter(log_format))
+logger.addHandler(file_handler)
 
 # ── PERSISTENT STATE ──
 STATE_PATH = os.path.join(_HERE, 'state', 'HERMES_CRYPTO_STATE.json')

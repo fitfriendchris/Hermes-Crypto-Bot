@@ -21,10 +21,8 @@ if [ "$BOT_COUNT" -gt 0 ]; then
     ps aux | grep HERMES_CRYPTO_BOT | grep -v grep
 fi
 
-# Start bot
-cd "$(dirname "$0")"
-export LIVE_MODE=$MODE
-nohup python3 HERMES_CRYPTO_BOT.py >> "$LOG_DIR/HERMES_CRYPTO_BOT.log" 2>&1 &
+# Start bot WITHOUT redirecting stdout (FileHandler already logs to file)
+nohup python3 HERMES_CRYPTO_BOT.py > /dev/null 2>> "$LOG_DIR/HERMES_CRYPTO_BOT.log" &
 echo "Bot PID: $!"
 sleep 5
 

@@ -24,7 +24,7 @@ from typing import Dict, List, Optional
 
 import aiohttp
 
-logger = logging.getLogger('CopyTrader')
+logger = logging.getLogger('CryptoBot')
 
 _HERE = os.path.dirname(os.path.abspath(__file__))
 

@@ -20,7 +20,7 @@ from typing import Dict, List, Optional, Tuple
 
 import aiohttp
 
-logger = logging.getLogger('MomentumScanner')
+logger = logging.getLogger('CryptoBot')
 
 # ── ICT STRUCTURE STATE ──
 # Tracks market structure per symbol for BOS/CHoCH detection

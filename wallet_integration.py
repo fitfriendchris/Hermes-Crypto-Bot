@@ -11,7 +11,7 @@ import os
 from typing import Dict, List, Optional, Tuple
 from dataclasses import dataclass
 
-logger = logging.getLogger('WalletIntegration')
+logger = logging.getLogger('CryptoBot')
 
 @dataclass
 class TokenBalance:

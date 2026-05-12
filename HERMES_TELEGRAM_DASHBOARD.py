@@ -329,6 +329,9 @@ def main_menu_keyboard():
             [
                 {"text": "🧹 CLEAN RESTART", "callback_data": "cmd_restart"},
                 {"text": "⚙️ CONFIG", "callback_data": "cmd_config"}
+            ],
+            [
+                {"text": "💰 WITHDRAW", "callback_data": "cmd_withdraw"}
             ]
         ]
     }
@@ -593,6 +596,63 @@ def format_config() -> str:
     return f"⚙️ <b>BOT CONFIG</b>\n━━━━━━━━━━━━━━━━━━━━━━\n<pre>{cfg}</pre>"
 
 
+def format_withdraw(state: Dict) -> str:
+    """Show withdraw info — wallet addresses and current balance."""
+    if not state:
+        return "❌ <b>STATE UNAVAILABLE</b>\n\nCannot show withdraw info."
+
+    bal = state.get('balance', 0)
+    positions = state.get('positions', {})
+    total_unrealized = 0.0
+    for sym, pos in positions.items():
+        entry = pos.get('entry', 0)
+        last = pos.get('last_price', entry)
+        invested = pos.get('invested', 0)
+        if entry > 0:
+            pnl_pct = (last - entry) / entry
+            pnl_usd = invested * pnl_pct
+            total_unrealized += pnl_usd
+
+    total_value = bal + total_unrealized
+
+    # Get wallet addresses from .env or config
+    wallet_info = []
+    cold_sol = os.getenv('COLD_WALLET_SOL', '')
+    cold_eth = os.getenv('COLD_WALLET_ETH', '')
+    exodus_pk = os.getenv('EXODUS_PRIVATE_KEY', '')
+    phantom_pk = os.getenv('PHANTOM_PRIVATE_KEY', '')
+
+    if cold_sol:
+        wallet_info.append(f"❄️ Cold SOL: <code>{cold_sol[:20]}...</code>")
+    if cold_eth:
+        wallet_info.append(f"❄️ Cold ETH: <code>{cold_eth[:20]}...</code>")
+    if exodus_pk:
+        wallet_info.append(f"👛 Exodus: <code>{exodus_pk[:15]}...</code>")
+    if phantom_pk:
+        wallet_info.append(f"👻 Phantom: <code>{phantom_pk[:15]}...</code>")
+
+    wallet_text = "\n".join(wallet_info) if wallet_info else "⚠️ No wallets configured in .env"
+
+    return (
+        f"💰 <b>WITHDRAWAL INFO</b>\n"
+        f"━━━━━━━━━━━━━━━━━━━━━━\n"
+        f"Available Cash: <b>${bal:.2f}</b>\n"
+        f"Unrealized PnL: <b>${total_unrealized:+.2f}</b>\n"
+        f"Total Value: <b>${total_value:.2f}</b>\n"
+        f"━━━━━━━━━━━━━━━━━━━━━━\n"
+        f"<b>WALLETS:</b>\n{wallet_text}\n"
+        f"━━━━━━━━━━━━━━━━━━━━━━\n"
+        f"<i>To withdraw:</i>\n"
+        f"1. Stop bot (🔴 STOP BOT)\n"
+        f"2. Export keys from .env\n"
+        f"3. Use wallet app to transfer\n"
+        f"━━━━━━━━━━━━━━━━━━━━━━\n"
+        f"<i>Configure wallets in .env:</i>\n"
+        f"COLD_WALLET_SOL=your_address\n"
+        f"COLD_WALLET_ETH=your_address"
+    )
+
+
 # ── COMMAND HANDLERS ──
 async def handle_command(chat_id: str, text: str):
     state = load_bot_state()
@@ -622,8 +682,11 @@ async def handle_command(chat_id: str, text: str):
     elif cmd == 'restart':
         result = bot_restart_clean()
         await send_message(chat_id, f"🧹 <b>CLEAN RESTART</b>\n━━━━━━━━━━━━━━━━━━━━━━\n{result}", main_menu_keyboard())
+    elif cmd == 'withdraw':
+        msg = format_withdraw(state) if state else "❌ State unavailable"
+        await send_message(chat_id, msg, main_menu_keyboard())
     else:
-        await send_message(chat_id, f"Unknown: {text}\nTry: /start /status /positions /pnl /trades /health /restart /config")
+        await send_message(chat_id, f"Unknown: {text}\nTry: /start /status /positions /pnl /trades /health /restart /config /withdraw")
 
 
 async def handle_callback(query: dict):
@@ -699,6 +762,11 @@ async def handle_callback(query: dict):
         msg = format_status(state, health) if state else "❌ State unavailable"
         await edit_message(chat_id, msg_id, msg, main_menu_keyboard())
         await answer_callback(query_id, "Refreshed")
+
+    elif data == 'cmd_withdraw':
+        msg = format_withdraw(state) if state else "❌ State unavailable"
+        await edit_message(chat_id, msg_id, msg, main_menu_keyboard())
+        await answer_callback(query_id, "Withdraw info loaded")
 
     else:
         await answer_callback(query_id, f"Unknown: {data}")

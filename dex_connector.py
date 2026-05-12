@@ -11,7 +11,7 @@ import logging
 from typing import Dict, List, Optional
 from datetime import datetime
 
-logger = logging.getLogger('DEXConnector')
+logger = logging.getLogger('CryptoBot')
 
 class DEXConnector:
     """Connect to Solana DEXs for micro-cap and meme coin trading."""

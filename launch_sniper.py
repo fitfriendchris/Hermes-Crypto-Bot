@@ -26,7 +26,7 @@ from typing import Dict, List, Optional, Tuple
 
 import aiohttp
 
-logger = logging.getLogger('LaunchSniper')
+logger = logging.getLogger('CryptoBot')
 
 _HERE = os.path.dirname(os.path.abspath(__file__))
 

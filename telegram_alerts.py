@@ -17,7 +17,7 @@ except ImportError:
     TELEGRAM_AVAILABLE = False
     logging.warning("python-telegram-bot not installed. Telegram alerts disabled.")
 
-logger = logging.getLogger('TelegramAlerts')
+logger = logging.getLogger('CryptoBot')
 
 class TelegramAlertManager:
     """Sends alerts via Telegram for bot events."""

@@ -9,7 +9,7 @@ import logging
 from typing import Dict, Optional
 from dataclasses import dataclass
 
-logger = logging.getLogger('ProfitProtection')
+logger = logging.getLogger('CryptoBot')
 
 @dataclass
 class TransferResult:

@@ -104,15 +104,17 @@ class JupiterSwap:
         out_amount_raw = int(quote.get("outAmount", 0))
 
         # 2 — serialize via Jupiter
-        exodus_key = os.getenv("EXODUS_PRIVATE_KEY", "")
-        if not exodus_key:
+        # Priority: PHANTOM_PRIVATE_KEY → EXODUS_PRIVATE_KEY
+        raw_key = (os.getenv("PHANTOM_PRIVATE_KEY", "").strip() or
+                   os.getenv("EXODUS_PRIVATE_KEY", "").strip())
+        if not raw_key:
             return SwapResult(False, input_mint, output_mint, amount_in,
                               out_amount_raw / 1e9, price_impact,
-                              error="EXODUS_PRIVATE_KEY not set in .env")
+                              error="No Solana private key in .env (PHANTOM_PRIVATE_KEY or EXODUS_PRIVATE_KEY)")
 
         try:
             from solders.keypair import Keypair
-            keypair = Keypair.from_base58_string(exodus_key)
+            keypair = Keypair.from_base58_string(raw_key)
             user_pk = str(keypair.pubkey())
         except Exception as e:
             return SwapResult(False, input_mint, output_mint, amount_in, 0.0,

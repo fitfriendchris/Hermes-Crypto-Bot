@@ -217,18 +217,21 @@ async def init_wallet():
         return
 
     # Priority: Exodus → Phantom → MetaMask
-    key = os.getenv('EXODUS_PRIVATE_KEY') or os.getenv('EXODUS_SEED_PHRASE')
-    preferred = 'exodus'
-    chain = 'solana'
+    exodus_key  = (os.getenv('EXODUS_PRIVATE_KEY') or '').strip()
+    phantom_key = (os.getenv('PHANTOM_PRIVATE_KEY') or '').strip()
 
-    if not key:
-        key = os.getenv('PHANTOM_PRIVATE_KEY')
-        preferred = 'phantom'
-
-    if not key:
-        key = os.getenv('METAMASK_PRIVATE_KEY')
+    if exodus_key and phantom_key:
+        # Both configured — use whichever has more SOL (checked below)
+        key, preferred = exodus_key, 'exodus'
+    elif exodus_key:
+        key, preferred = exodus_key, 'exodus'
+    elif phantom_key:
+        key, preferred = phantom_key, 'phantom'
+    else:
+        key = (os.getenv('METAMASK_PRIVATE_KEY') or '').strip()
         preferred = 'metamask'
-        chain = 'ethereum'
+
+    chain = 'ethereum' if preferred == 'metamask' else 'solana'
 
     if not key:
         logger.info("No wallet keys in .env — running without wallet (paper only)")

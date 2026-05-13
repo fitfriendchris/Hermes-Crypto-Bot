@@ -564,16 +564,13 @@ def check_exit(sym: str, price: float) -> Optional[str]:
             pos['stop_type'] = 'profit_floor'
             logger.info(f"🔒 {sym} profit floor locked at +5% (${floor_price:.6f}) after {hold_minutes:.0f}m")
 
-    tp = CONFIG['take_profit']
-    exit1_pct  = float(tp.get('exit_1_pct', 0.20))   # sell 50% at +20%
-    exit2_pct  = float(tp.get('exit_2_pct', 0.50))   # sell 50% at +50%
-    trail_pct  = float(tp.get('trail_pct',  0.12))   # 12% trail after exit 1
+    tp         = CONFIG['take_profit']
+    exit1_pct  = float(tp.get('exit_1_pct', 0.20))
+    trail_pct  = float(tp.get('trail_pct',  0.10))   # 10% trail (tighter than old 12%)
 
-    # ── Exit 1: take 50% at +20% ──
-    # Triggered by price percentage from entry (not R, which breaks when stop moves above entry)
+    # ── Exit 1: sell 50% at +20%, lock in profit and move stop to BE+2% ──
     if not pos['tier_exits']['1'] and unrealized_pct >= exit1_pct:
         pos['tier_exits']['1'] = True
-        # Move hard stop to breakeven +2% so we can never lose on this trade
         be_price = pos['entry'] * 1.02
         if be_price > pos['stop']:
             pos['stop']      = be_price
@@ -581,22 +578,25 @@ def check_exit(sym: str, price: float) -> Optional[str]:
             logger.info(f"🔒 {sym} stop → BE+2% (${be_price:.6f}) after Exit 1")
         return "tier_1_exit1"
 
-    # ── Trailing stop: 12% below peak once Exit 1 is taken ──
-    if pos['tier_exits']['1'] and not pos['tier_exits']['2']:
-        trail_price = pos['highest_price'] * (1 - trail_pct)
-        floor       = pos['entry'] * 1.02   # never trail below BE+2%
+    # ── Progressive trailing stop after Exit 1 ──
+    # Tightens as gains grow — protects more of the run the higher it goes
+    if pos['tier_exits']['1']:
+        if unrealized_pct >= 1.0:
+            effective_trail = 0.06      # +100%+: trail 6% — lock almost all gains
+        elif unrealized_pct >= 0.50:
+            effective_trail = 0.08      # +50%-100%: trail 8%
+        else:
+            effective_trail = trail_pct  # +20%-50%: trail 10%
+
+        trail_price = pos['highest_price'] * (1 - effective_trail)
+        floor       = pos['entry'] * 1.02
         trail_price = max(trail_price, floor)
         if trail_price > pos['stop']:
             pos['stop']      = trail_price
             pos['stop_type'] = 'trailing'
-            logger.info(f"📈 {sym} trailing stop → ${trail_price:.6f}")
+            logger.debug(f"📈 {sym} trail → ${trail_price:.6f} ({effective_trail*100:.0f}% from peak)")
 
-    # ── Exit 2: sell remaining 50% at +50% ──
-    if not pos['tier_exits']['2'] and unrealized_pct >= exit2_pct:
-        pos['tier_exits']['2'] = True
-        return "tier_2_exit2"
-
-    # ── Profit floor: if +10% after 30m, lock at +5% (never let a winner become a loser) ──
+    # ── Profit floor: lock +5% after 30m of being +10% up ──
     if hold_minutes >= 30 and unrealized_pct >= 0.10 and pos['stop_type'] not in ('profit_floor', 'breakeven', 'trailing'):
         floor_price = pos['entry'] * 1.05
         if floor_price > pos['stop']:
@@ -637,12 +637,13 @@ async def paper_sell(sym: str, price: float, reason: str):
     if not pos:
         return
 
-    # 2-tier exit: Exit 1 → sell 50%, Exit 2 → sell remaining (100% of what's left)
-    # All other reasons (stop, time, trailing) → close full remaining position
+    # Exit 1 → sell 50%, everything else → close full remaining position
+    pyramid_this = False
     if 'tier_1_exit1' in reason:
-        portion = 0.50
+        portion      = 0.50
+        pyramid_this = (pos.get('pyramid_count', 0) == 0)  # only pyramid once
     else:
-        portion = 1.0   # tier_2_exit2, stop_loss, time_stop, trailing — full exit
+        portion = 1.0
 
     sell_qty = pos['quantity'] * portion
     proceeds = sell_qty * price
@@ -699,6 +700,31 @@ async def paper_sell(sym: str, price: float, reason: str):
 
     # ── RECORD SYMBOL TRADE FOR LIFETIME TRACKING ──
     record_symbol_trade(sym, pnl)
+
+    # ── PYRAMID: add to confirmed winner after Exit 1 ──
+    # Only fires when: Exit 1 hit (+20% proven), first pyramid, enough balance
+    if pyramid_this and sym in state.positions:
+        pyr_size = min(
+            state.balance * CONFIG['account']['max_risk_per_trade'] * 1.5,
+            state.balance * 0.10,
+        )
+        if pyr_size >= CONFIG['account']['min_trade_size_usd'] and state.balance > pyr_size * 1.5:
+            live_pos = state.positions[sym]
+            pyr_qty  = pyr_size / price if price > 0 else 0
+            state.balance         -= pyr_size
+            live_pos['quantity']  += pyr_qty
+            live_pos['invested']  += pyr_size
+            live_pos['pyramid_count'] = live_pos.get('pyramid_count', 0) + 1
+            logger.info(f"🔺 PYRAMID {sym}: +${pyr_size:.2f} @ ${price:.6f} — riding confirmed winner")
+            if alerts:
+                try:
+                    await alerts.send_info(
+                        f"🔺 PYRAMID {sym}\n"
+                        f"Added ${pyr_size:.2f} @ ${price:.6f} after Exit 1 confirmed\n"
+                        f"Total exposure: ${live_pos['invested']:.2f}"
+                    )
+                except Exception:
+                    pass
 
     if alerts:
         try:
@@ -817,7 +843,6 @@ async def live_sell(sym: str, price: float, reason: str):
         await paper_sell(sym, price, reason)
         return
 
-    # 2-tier exit: Exit 1 → sell 50%, everything else → full close
     portion = 0.50 if 'tier_1_exit1' in reason else 1.0
 
     sell_qty      = pos['quantity'] * portion
@@ -992,7 +1017,7 @@ async def discovery_loop():
             tokens = await dex.discover_tokens("mixed", limit=50)  # Get more for filtering
             logger.info(f"Found {len(tokens)} eligible tokens")
 
-            for token in tokens[:15]:  # Check top 15 (more candidates, stricter filters)
+            for token in tokens[:20]:  # Check top 20 — wider net, stricter filters catch the bad ones
                 sym = token.get('baseToken', {}).get('symbol') or token.get('symbol', 'UNKNOWN')
 
                 if sym in state.positions:
@@ -1085,7 +1110,7 @@ async def discovery_loop():
         except Exception as e:
             logger.error(f"Discovery error: {e}")
 
-        await asyncio.sleep(60)
+        await asyncio.sleep(30)   # 30s cycle — 2× faster signal detection
 
 async def sniper_loop():
     """Dedicated sniper loop for launch monitoring."""

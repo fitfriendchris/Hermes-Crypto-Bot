@@ -40,11 +40,11 @@ compliance:
 account:
   starting_balance_usd: 100.00
   current_balance_usd: 100.00
-  max_risk_per_trade: 0.06        # 6% of balance — tighter sizing, more staying power
-  max_open_positions: 3           # Max 3 at once — focus, not scatter
-  max_drawdown_pct: 0.15          # Pause at 15% DD (tighter circuit)
-  min_trade_size_usd: 5.00        # $5 minimum
-  compound: true                  # Reinvest profits
+  max_risk_per_trade: 0.09        # 9% — 54% of Kelly optimal (47% WR, 2.33 R:R → Kelly=25%)
+  max_open_positions: 4           # 4 simultaneous — more compounding surface
+  max_drawdown_pct: 0.15          # Pause at 15% DD
+  min_trade_size_usd: 5.00
+  compound: true                  # Reinvest profits — critical for exponential growth
 
 # PROFIT PROTECTION (Legacy — use sweeper below instead)
 profit_protection:
@@ -266,20 +266,16 @@ stop_loss:
   dev_sell_stop: true
 
 take_profit:
-  method: two_tier_fast           # Optimized: take money fast, trail runners
+  method: trail_only              # Pure trailing — no fixed exit cap, lets runners run
 
-  # Exit 1: sell 50% at +20% → locks profit, moves stop to breakeven+2%
-  exit_1_pct: 0.20
+  # Exit 1: lock profit, set up trail
+  exit_1_pct: 0.20                # Sell 50% at +20% → moves stop to BE+2%
 
-  # Exit 2: sell remaining 50% at +50%
-  exit_2_pct: 0.50
-
-  # Trailing stop: 12% below rolling peak (activates after Exit 1)
-  trail_pct: 0.12
-
-  # Legacy fields (kept for reference, not used by new exit logic)
-  tier_1_r: 1.33                  # +20% with 15% stop ≈ 1.33R
-  tier_2_r: 3.33                  # +50% with 15% stop ≈ 3.33R
+  # No fixed Exit 2 — progressive trailing does it:
+  #   +20% to +50%:  trail 10% below peak
+  #   +50% to +100%: trail 8%  below peak
+  #   +100%+:        trail 6%  below peak (locks almost all gains on mega-runners)
+  trail_pct: 0.10
 
 coin_selection:
   # Major anchors (stability)

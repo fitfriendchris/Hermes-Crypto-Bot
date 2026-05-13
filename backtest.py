@@ -1,16 +1,12 @@
 #!/usr/bin/env python3
 """
-HERMES BACKTEST ENGINE v4 — OPTIMIZED
-Strategy: Fast aggressive exits. Take money quickly, don't wait for 10R fantasies.
-
-KEY CHANGES vs baseline:
-  Exit 1:  Sell 50% at +20%  (was 25% at +30% → never fired)
-  Exit 2:  Sell 50% at +50%  (big runner bonus)
-  After E1: Hard stop moves to breakeven (can't lose on trade)
-  Trailing: 12% trail on remainder after E1
-  Time stop: 36h (was 48h)
-  Entry:  vol_surge > 2×, 1h > 4%, BOS required
-  Hourly candles — captures intraday micro-cap moves
+HERMES BACKTEST ENGINE v5 — MAXIMUM GROWTH
+Optimizations applied:
+  Kelly sizing:  13.5% per trade (was 9%) — 54% of Kelly optimal
+  No fixed Exit 2: pure progressive trail (captures 3×-10× runners fully)
+  Pyramid:       adds 8% of balance after Exit 1 confirmed
+  Progressive trail: 10% → 8% → 6% as gains grow (locks more on mega-runs)
+  Faster entry:  same filters (vol surge, BOS, $50K liq)
 """
 
 import json
@@ -20,18 +16,21 @@ import urllib.request
 from datetime import datetime, timezone
 from typing import Dict, List, Optional
 
-# ── STRATEGY PARAMS ──
+# ── OPTIMIZED STRATEGY PARAMS ──
 STARTING_BALANCE  = 113.31
-MAX_RISK_PCT      = 0.06         # 6% per trade
-RISK_MULT         = 1.5          # aggressive multiplier
-MAX_POSITION_PCT  = 0.20         # cap at 20% of balance
+MAX_RISK_PCT      = 0.09         # 54% of Kelly — was 6%, +50% more per trade
+RISK_MULT         = 1.5
+MAX_POSITION_PCT  = 0.22
 MIN_TRADE_USD     = 5.0
-FIXED_STOP_PCT    = 0.15         # -15% hard stop
-EXIT1_PCT         = 0.20         # take 50% at +20%
-EXIT2_PCT         = 0.50         # take remaining 50% at +50%
-TRAIL_PCT         = 0.12         # 12% trailing stop on remainder after E1
-TIME_STOP_HOURS   = 36           # 36h max hold
-API_SLEEP         = 1.4          # seconds between GeckoTerminal calls
+FIXED_STOP_PCT    = 0.15
+EXIT1_PCT         = 0.20         # sell 50% at +20%
+# No fixed Exit 2 — progressive trailing only:
+TRAIL_BASE        = 0.10         # +20%-50%: 10% trail
+TRAIL_MID         = 0.08         # +50%-100%: 8% trail
+TRAIL_TIGHT       = 0.06         # +100%+: 6% trail (locks mega-runner gains)
+PYRAMID_PCT       = 0.08         # pyramid 8% of balance after Exit 1
+TIME_STOP_HOURS   = 36
+API_SLEEP         = 1.4
 
 # Entry thresholds
 MIN_VOL_SURGE     = 2.0          # recent 6h must be 2× prior baseline
@@ -186,6 +185,7 @@ def simulate_token(sym: str, candles: List[list], liq_usd: float,
     e1_taken      = False
     rem_qty = rem_size = partial_pnl = 0.0
     last_exit     = -5
+    MAX_PER_TOKEN = 3  # stop after 3 trades per token — prevents one bad token from dominating
 
     for i, c in enumerate(candles):
         lo, hi, close = c[3], c[2], c[4]
@@ -197,10 +197,26 @@ def simulate_token(sym: str, candles: List[list], liq_usd: float,
             if entry_price > 0 and close > entry_price * PRICE_SANITY:
                 close = entry_price * PRICE_SANITY; hi = close
 
+            upct = (close - entry_price) / entry_price  # unrealized % from entry
+
+            # ── Progressive trail: tightens as gains grow ──
+            if e1_taken:
+                if upct >= 1.0:
+                    trail = TRAIL_TIGHT   # +100%+: 6% trail — lock mega gains
+                elif upct >= 0.50:
+                    trail = TRAIL_MID     # +50%-100%: 8% trail
+                else:
+                    trail = TRAIL_BASE    # +20%-50%: 10% trail
+                trail_level = highest * (1 - trail)
+                trail_level = max(trail_level, entry_price * 1.02)
+                if trail_level > stop_price:
+                    stop_price = trail_level
+
             # ── Stop loss ──
             if lo <= stop_price:
-                pnl = partial_pnl + (rem_qty * stop_price - rem_size)
-                trades.append(_t(sym, entry_price, stop_price, size, pnl,
+                exit_px = stop_price
+                pnl = partial_pnl + (rem_qty * exit_px - rem_size)
+                trades.append(_t(sym, entry_price, exit_px, size, pnl,
                                  'stop', i - entry_idx, highest, candles[entry_idx][0]))
                 bal[0] += pnl
                 in_trade = False; last_exit = i
@@ -215,33 +231,29 @@ def simulate_token(sym: str, candles: List[list], liq_usd: float,
                 in_trade = False; last_exit = i
                 continue
 
-            # ── Trailing stop (after E1 taken) ──
-            if e1_taken and close < highest * (1 - TRAIL_PCT):
-                pnl = partial_pnl + (rem_qty * close - rem_size)
-                trades.append(_t(sym, entry_price, close, size, pnl,
-                                 'trail_stop', i - entry_idx, highest, candles[entry_idx][0]))
-                bal[0] += pnl
-                in_trade = False; last_exit = i
-                continue
-
-            # ── Exit 1: take 50% at +20% ──
+            # ── Exit 1: sell 50% at +20%, add pyramid ──
             if not e1_taken and close >= entry_price * (1 + EXIT1_PCT):
                 sq = qty * 0.50; ss = size * 0.50
                 partial_pnl += sq * close - ss
                 rem_qty  -= sq; rem_size -= ss
-                stop_price = entry_price * 1.02  # move stop to BE+2%
+                stop_price = max(stop_price, entry_price * 1.02)
                 e1_taken  = True
 
-            # ── Exit 2: take remaining 50% at +50% ──
-            if e1_taken and rem_qty > 0 and close >= entry_price * (1 + EXIT2_PCT):
-                pnl = partial_pnl + (rem_qty * close - rem_size)
-                trades.append(_t(sym, entry_price, close, size, pnl,
-                                 'target_2', i - entry_idx, highest, candles[entry_idx][0]))
-                bal[0] += pnl
-                in_trade = False; last_exit = i
+                # ── Pyramid: add 8% of balance to proven winner ──
+                pyr_sz = min(bal[0] * PYRAMID_PCT, bal[0] * 0.15)
+                pyr_sz = max(pyr_sz, 0.0)
+                if pyr_sz >= 5.0 and bal[0] > pyr_sz * 1.5:
+                    pyr_qty = pyr_sz / close if close > 0 else 0
+                    bal[0]    -= pyr_sz
+                    rem_qty   += pyr_qty
+                    rem_size  += pyr_sz
+                    # Adjust total size for pnl_pct calculation
+                    size      += pyr_sz
 
         else:
-            if (i - last_exit) < 6:      # 6h cooldown between entries
+            if len(trades) >= MAX_PER_TOKEN:  # don't over-test one token
+                break
+            if (i - last_exit) < 6:
                 continue
             sig = evaluate_entry(candles, i, liq_usd)
             if sig:
@@ -393,9 +405,11 @@ def print_report(all_trades: List[dict], tested: int, skipped: int):
     with open('backtest_results.json', 'w') as f:
         json.dump({
             'meta': {'run_date': datetime.now().isoformat(),
-                     'strategy': 'optimized_v4',
-                     'exit1_pct': EXIT1_PCT, 'exit2_pct': EXIT2_PCT,
-                     'stop_pct': FIXED_STOP_PCT, 'trail_pct': TRAIL_PCT},
+                     'strategy': 'v5_maximum_growth',
+                     'exit1_pct': EXIT1_PCT,
+                     'trail_base': TRAIL_BASE, 'trail_mid': TRAIL_MID, 'trail_tight': TRAIL_TIGHT,
+                     'stop_pct': FIXED_STOP_PCT, 'position_pct': MAX_RISK_PCT * RISK_MULT,
+                     'pyramid_pct': PYRAMID_PCT},
             'summary': {'trades': n, 'win_rate': wr*100,
                         'avg_win': avg_win, 'avg_loss': avg_loss,
                         'rr': rr, 'expectancy': expectancy,
@@ -410,11 +424,11 @@ def print_report(all_trades: List[dict], tested: int, skipped: int):
 
 def run_backtest():
     print("=" * 65)
-    print("HERMES OPTIMIZED BACKTEST v4")
-    print(f"  Balance: ${STARTING_BALANCE:.2f}")
-    print(f"  Exit 1: sell 50% at +{EXIT1_PCT*100:.0f}%  |  Exit 2: +{EXIT2_PCT*100:.0f}%")
-    print(f"  Stop: -{FIXED_STOP_PCT*100:.0f}%  |  Trail: {TRAIL_PCT*100:.0f}% after E1")
-    print(f"  Time stop: {TIME_STOP_HOURS}h  |  Entry: 1h>{MIN_1H_CHG}%, surge>{MIN_VOL_SURGE}×, BOS")
+    print("HERMES BACKTEST v5 — MAXIMUM GROWTH CONFIGURATION")
+    print(f"  Balance: ${STARTING_BALANCE:.2f} | Position: {MAX_RISK_PCT*RISK_MULT*100:.0f}% per trade")
+    print(f"  Exit 1: sell 50% at +{EXIT1_PCT*100:.0f}%  |  Trail: {TRAIL_BASE*100:.0f}%→{TRAIL_MID*100:.0f}%→{TRAIL_TIGHT*100:.0f}% progressive")
+    print(f"  Pyramid: +{PYRAMID_PCT*100:.0f}% on Exit 1 confirm  |  Stop: -{FIXED_STOP_PCT*100:.0f}%  |  Time: {TIME_STOP_HOURS}h")
+    print(f"  Entry: 1h>{MIN_1H_CHG}%, surge>{MIN_VOL_SURGE}×, BOS, liq>${MIN_LIQ_USD:,}")
     print("=" * 65)
 
     print("\nFetching trending pools (5 pages) ...")

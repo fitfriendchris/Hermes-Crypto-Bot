@@ -33,14 +33,18 @@ _HERE = os.path.dirname(os.path.abspath(__file__))
 # ── SNIPER CONFIG ──
 SNIPER_CONFIG = {
     'liquidity_threshold_usd': 10000,    # Snipe when LP >= $10K
-    'max_mc_at_entry': 500000,          # Max $500K market cap
+    'max_mc_at_entry': 500000,           # Max $500K market cap
     'min_holder_count': 10,              # At least 10 holders
-    'max_slippage_pct': 0.05,           # 5% max slippage
-    'position_size_pct': 0.05,           # 5% of balance per snipe
-    'auto_sell_r': 2.0,                  # Sell at 2R (100% gain)
-    'time_stop_minutes': 240,            # 4 hour max hold
+    'max_slippage_pct': 0.05,            # 5% max slippage
+    'position_size_pct': 0.08,           # 8% per snipe (was 5%) — launch pumps are highest alpha
+    # Exit strategy: 50% at 2× (100%), trail remaining 50% with 20% stop
+    # Pump.fun tokens can go 10×-50×; old 2R exit missed almost everything
+    'exit1_at_x': 2.0,                   # sell 50% when price = 2× entry
+    'trail_pct': 0.20,                   # 20% trail on remaining 50% (more room for pump volatility)
+    'stop_pct': 0.25,                    # 25% hard stop (pump tokens are volatile at entry)
+    'time_stop_minutes': 120,            # 2h max hold (was 4h) — pump resolves fast
     'max_daily_snipes': 5,               # Max 5 snipes/day
-    'cooldown_between_snipes_min': 30,   # 30 min between snipes
+    'cooldown_between_snipes_min': 20,   # 20 min between snipes (was 30)
 }
 
 # ── LAUNCH TRACKING ──

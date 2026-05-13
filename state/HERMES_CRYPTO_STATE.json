@@ -1,100 +1,7 @@
 {
-  "balance": 2845.409341454542,
-  "positions": {
-    "PASTEL": {
-      "token": "PASTEL",
-      "address": "0xDD5bC85A16593703AFdc092A5E72f0a29E61cb07",
-      "chain": "base",
-      "entry": 1.234e-06,
-      "quantity": 11248471.401902862,
-      "invested": 13.88061370994813,
-      "stop": 1.0489e-06,
-      "stop_type": "fixed",
-      "risk_pct": 0.14999999999999994,
-      "opened_at": "2026-05-11T18:38:42.175471",
-      "tier_exits": {
-        "1": false,
-        "2": false,
-        "3": false,
-        "4": false
-      },
-      "highest_price": 1.595e-06,
-      "last_price": 1.056e-06,
-      "score": 75,
-      "flags": [
-        "brand_new",
-        "no_socials",
-        "no_website"
-      ],
-      "pyramid_count": 0
-    },
-    "MRP": {
-      "token": "MRP",
-      "address": "0xDd2992d0061cD21F91a1A38cBe3885382C17a4BC",
-      "chain": "ethereum",
-      "entry": 0.2705,
-      "quantity": 72.04193705359181,
-      "invested": 19.487343972996587,
-      "stop": 0.22992500000000002,
-      "stop_type": "fixed",
-      "risk_pct": 0.15,
-      "opened_at": "2026-05-11T19:23:38.744077",
-      "tier_exits": {
-        "1": false,
-        "2": false,
-        "3": false,
-        "4": false
-      },
-      "highest_price": 0.2705,
-      "last_price": 0.2631,
-      "score": 85,
-      "flags": [
-        "no_socials",
-        "no_website"
-      ],
-      "pyramid_count": 0
-    },
-    "anon": {
-      "token": "anon",
-      "address": "0xBb9238fc073BfACd3b252f1b11d7681e9d081ac8",
-      "chain": "ethereum",
-      "entry": 0.0005879,
-      "quantity": 11108.120289240856,
-      "invested": 6.5304639180447,
-      "stop": 0.0006466900000000001,
-      "stop_type": "trailing_profit",
-      "risk_pct": 0.1500000000000001,
-      "opened_at": "2026-05-11T20:32:48.560505",
-      "tier_exits": {
-        "1": true,
-        "2": false,
-        "3": false,
-        "4": false
-      },
-      "highest_price": 0.7496,
-      "last_price": 0.7459,
-      "score": 75,
-      "flags": [
-        "brand_new",
-        "no_socials",
-        "no_website"
-      ],
-      "pyramid_count": 0
-    }
-  },
+  "balance": 113.31,
+  "positions": {},
   "history": [
-    {
-      "token": "Eileen",
-      "entry": 8.178e-05,
-      "exit": 6.791e-05,
-      "invested": 13.696283286848649,
-      "proceeds": 11.373374883955634,
-      "pnl": -2.322908402893015,
-      "pnl_pct": -0.16960136952800195,
-      "reason": "stop_loss_fixed",
-      "hold_time_hours": 0.1,
-      "highest_price": 0.0001034
-    },
     {
       "token": "ACTCREW",
       "entry": 0.0001242,
@@ -1306,12 +1213,25 @@
       "hold_time_hours": 5.2,
       "highest_price": 0.7496,
       "portion": 0.25
+    },
+    {
+      "token": "PASTEL",
+      "entry": 1.234e-06,
+      "exit": 1.04e-06,
+      "invested": 13.88061370994813,
+      "proceeds": 11.698410257978976,
+      "pnl": -2.182203451969155,
+      "pnl_pct": -0.1572123176661264,
+      "reason": "stop_loss_fixed",
+      "hold_time_hours": 10.6,
+      "highest_price": 1.595e-06,
+      "portion": 1.0
     }
   ],
-  "daily_pnl": 2785.3077630555313,
+  "daily_pnl": 2783.125559603562,
   "trades_today": 120,
-  "consecutive_losses": 0,
+  "consecutive_losses": 1,
   "max_drawdown": 0.185947227395766,
   "total_protected": 0.0,
-  "timestamp": "2026-05-12T02:45:14.306852"
+  "timestamp": "2026-05-12T22:25:07.907650"
 }

@@ -1,142 +1,202 @@
 """
 TELEGRAM ALERT MODULE
-Real-time notifications for bot events
-Author: Hermes | March 2026 SEC/CFTC compliant
+Direct Bot API via httpx — no python-telegram-bot dependency.
+Author: Hermes | May 2026
 """
 
 import asyncio
 import logging
+import os
 from datetime import datetime
-from typing import Dict, Optional
+from typing import Dict, List, Optional
 
-try:
-    from telegram import Bot, Update
-    from telegram.ext import Application, CommandHandler, ContextTypes
-    TELEGRAM_AVAILABLE = True
-except ImportError:
-    TELEGRAM_AVAILABLE = False
-    logging.warning("python-telegram-bot not installed. Telegram alerts disabled.")
+import httpx
 
 logger = logging.getLogger('CryptoBot')
 
+
 class TelegramAlertManager:
-    """Sends alerts via Telegram for bot events."""
-    
+    """Sends alerts via direct Telegram Bot API (httpx)."""
+
     def __init__(self, token: str, chat_id: str):
-        self.token = token
-        self.chat_id = chat_id
-        self.bot = None
-        self.application = None
-        
-        if TELEGRAM_AVAILABLE and token and chat_id:
-            self.bot = Bot(token=token)
-            logger.info("Telegram alerts initialized")
+        self.token   = token
+        self.chat_id = str(chat_id)
+        self._base   = f"https://api.telegram.org/bot{token}"
+        self._ok     = bool(token and chat_id)
+        if self._ok:
+            logger.info("Telegram alerts ready (httpx)")
         else:
-            logger.warning("Telegram alerts not available")
-    
+            logger.warning("Telegram alerts disabled — missing TOKEN or CHAT_ID")
+
+    async def _send(self, text: str):
+        if not self._ok:
+            return
+        try:
+            async with httpx.AsyncClient(timeout=10) as client:
+                await client.post(
+                    f"{self._base}/sendMessage",
+                    json={
+                        "chat_id":                   self.chat_id,
+                        "text":                      text,
+                        "parse_mode":                "HTML",
+                        "disable_web_page_preview":  True,
+                    },
+                )
+        except Exception as e:
+            logger.debug(f"Telegram send error: {e}")
+
+    # ── Bot lifecycle ──────────────────────────────────────────
+
     async def send_startup(self):
-        message = (
-            f"🚀 <b>Crypto Bot Started</b>\n"
+        live = os.getenv("LIVE_MODE", "false").lower() == "true"
+        mode = "🔴 <b>LIVE</b>" if live else "📄 PAPER"
+        await self._send(
+            f"🚀 <b>Hermes Crypto Bot Started</b>\n"
             f"━━━━━━━━━━━━━━━━━━━━━━\n"
+            f"Mode: {mode}\n"
             f"Time: {datetime.now().strftime('%Y-%m-%d %H:%M')}\n"
-            f"Mode: <b>AGGRESSIVE</b>\n"
             f"━━━━━━━━━━━━━━━━━━━━━━"
         )
-        await self._send(message)
-    
-    async def send_whale_signal(self, trade: Dict):
-        token = trade.get('token', 'Unknown')
-        amount = trade.get('value_usd', 0)
-        whale = trade.get('wallet', 'Unknown')[:20]
-        
-        message = (
-            f"🐋 <b>WHALE SIGNAL</b>\n"
-            f"Token: <code>{token}</code>\n"
-            f"Amount: <b>${amount:,.0f}</b>\n"
-            f"Whale: <code>{whale}...</code>\n"
-            f"Time: {datetime.now().strftime('%H:%M:%S')}"
-        )
-        await self._send(message)
-    
+
+    async def send_info(self, text: str):
+        """Generic info message — text passed as-is."""
+        await self._send(text)
+
+    # ── Trade events ───────────────────────────────────────────
+
     async def send_position_opened(self, position: Dict):
-        token = position['token']
-        entry = position['entry']
-        size = position['size']
-        stop = position['stop']
-        risk = position['risk_pct'] * 100
-        
-        message = (
-            f"✅ <b>POSITION OPENED</b>\n"
-            f"Token: <code>{token}</code>\n"
-            f"Entry: <b>${entry:.6f}</b>\n"
-            f"Size: <b>${size:.2f}</b>\n"
-            f"Stop: <b>${stop:.6f}</b>\n"
-            f"Risk: <b>{risk:.1f}%</b>"
+        sym    = position.get('token', '?')
+        entry  = position.get('entry', 0)
+        size   = position.get('invested', 0)     # 'size' was a prior naming bug
+        stop   = position.get('stop', 0)
+        risk   = position.get('risk_pct', 0) * 100
+        score  = position.get('score', 0)
+        chain  = position.get('chain', 'solana')
+        source = position.get('source', 'scanner')
+        live   = os.getenv("LIVE_MODE", "false").lower() == "true"
+        tag    = "🔴 LIVE" if (live and chain == 'solana') else "📄 PAPER"
+
+        await self._send(
+            f"✅ <b>ENTRY [{tag}]</b>\n"
+            f"Token:  <code>{sym}</code>  ({chain})\n"
+            f"Entry:  <b>${entry:.8f}</b>\n"
+            f"Size:   <b>${size:.2f}</b>\n"
+            f"Stop:   <b>${stop:.8f}</b>  (risk {risk:.1f}%)\n"
+            f"Score:  <b>{score}</b> | via {source}"
         )
-        await self._send(message)
-    
+
     async def send_position_closed(self, result: Dict):
-        token = result['token']
-        pnl_pct = result['pnl_pct'] * 100
-        pnl_usd = result['pnl_usd']
-        reason = result['reason']
-        
-        emoji = "🟢" if pnl_usd > 0 else "🔴"
-        
-        message = (
-            f"{emoji} <b>POSITION CLOSED</b>\n"
-            f"Token: <code>{token}</code>\n"
-            f"PnL: <b>${pnl_usd:+.2f}</b> ({pnl_pct:+.1f}%)\n"
+        sym     = result.get('token', '?')
+        pnl_pct = result.get('pnl_pct', 0) * 100
+        pnl_usd = result.get('pnl_usd', 0)
+        reason  = result.get('reason', '?')
+        portion = result.get('portion', 1.0)
+        emoji   = "🟢" if pnl_usd > 0 else "🔴"
+        ptag    = f" [{portion:.0%}]" if portion < 0.99 else ""
+
+        await self._send(
+            f"{emoji} <b>EXIT{ptag}</b>\n"
+            f"Token:  <code>{sym}</code>\n"
+            f"PnL:    <b>${pnl_usd:+.2f}</b>  ({pnl_pct:+.1f}%)\n"
             f"Reason: <code>{reason}</code>"
         )
-        await self._send(message)
-    
-    async def send_rug_pull_alert(self, token: str, signals: list):
-        signal_str = '\n'.join([f"  • {s}" for s in signals])
-        
-        message = (
-            f"🚨 <b>RUG PULL ALERT</b>\n"
-            f"Token: <code>{token}</code>\n"
-            f"Signals:\n{signal_str}\n"
-            f"Action: <b>EMERGENCY EXIT</b>"
+
+    async def send_trade_summary(self, snap: Dict):
+        """Full portfolio snapshot after every trade."""
+        bal        = snap.get('balance', 0)
+        total      = snap.get('total_value', bal)
+        start      = snap.get('starting_balance', 100.0)
+        unrealized = snap.get('unrealized_pnl_usd', 0)
+        daily      = snap.get('daily_pnl', 0)
+        dd         = snap.get('max_drawdown', 0)
+        consec     = snap.get('consecutive_losses', 0)
+        positions  = snap.get('positions', {})
+        history    = snap.get('history', [])
+
+        total_ret  = (total - start) / start if start > 0 else 0
+        net_real   = sum(t.get('pnl', 0) for t in history)
+
+        pos_lines = []
+        for sym, pos in positions.items():
+            entry = pos.get('entry', 0)
+            last  = pos.get('last_price', entry)
+            inv   = pos.get('invested', 0)
+            pct   = (last - entry) / entry if entry > 0 else 0
+            usd   = inv * pct
+            pos_lines.append(f"  • {sym}: ${usd:+.2f} ({pct:+.1%})")
+
+        pos_text = "\n".join(pos_lines) if pos_lines else "  (none)"
+        d_emoji  = "🟢" if daily >= 0 else "🔴"
+        u_emoji  = "🟢" if unrealized >= 0 else "🔴"
+
+        await self._send(
+            f"📊 <b>PORTFOLIO</b>\n"
+            f"━━━━━━━━━━━━━━━━━━━━━━\n"
+            f"💰 Cash: <b>${bal:.2f}</b>\n"
+            f"💎 Value: <b>${total:.2f}</b>  ({total_ret:+.1%})\n"
+            f"{d_emoji} Daily: <b>${daily:+.2f}</b>\n"
+            f"{u_emoji} Unrealized: <b>${unrealized:+.2f}</b>\n"
+            f"📊 Realized: <b>${net_real:+.2f}</b>\n"
+            f"📉 DD: <b>{dd:.1%}</b> | Losses: <b>{consec}/5</b>\n"
+            f"━━━━━━━━━━━━━━━━━━━━━━\n"
+            f"<b>Open:</b>\n{pos_text}"
         )
-        await self._send(message)
-    
-    async def send_daily_report(self, balance: float, daily_pnl: float, trades: int, open_positions: int, win_rate: float):
+
+    # ── Daily / alerts ─────────────────────────────────────────
+
+    async def send_daily_report(
+        self,
+        balance: float,
+        daily_pnl: float,
+        trades: int,
+        open_positions: int,
+        win_rate: float,
+    ):
         emoji = "🟢" if daily_pnl >= 0 else "🔴"
-        
-        message = (
-            f"📊 <b>DAILY REPORT</b>\n"
-            f"Date: {datetime.now().strftime('%Y-%m-%d')}\n"
+        await self._send(
+            f"📊 <b>DAILY — {datetime.now().strftime('%Y-%m-%d')}</b>\n"
+            f"━━━━━━━━━━━━━━━━━━━━━━\n"
             f"Balance: <b>${balance:.2f}</b>\n"
-            f"Daily PnL: {emoji} <b>${daily_pnl:+.2f}</b>\n"
-            f"Trades: <b>{trades}</b>\n"
-            f"Open: <b>{open_positions}</b>\n"
+            f"{emoji} PnL: <b>${daily_pnl:+.2f}</b>\n"
+            f"Trades: <b>{trades}</b> | Open: <b>{open_positions}</b>\n"
             f"Win Rate: <b>{win_rate:.0%}</b>"
         )
-        await self._send(message)
-    
-    async def _send(self, message: str):
-        if not self.bot:
-            logger.debug(f"Telegram not available")
-            return
-        
-        try:
-            await self.bot.send_message(
-                chat_id=self.chat_id,
-                text=message,
-                parse_mode='HTML',
-                disable_web_page_preview=True
-            )
-        except Exception as e:
-            logger.error(f"Telegram send failed: {e}")
 
-async def test():
-    print("=== TELEGRAM ALERT TEST ===")
-    alerts = TelegramAlertManager("", "")
-    await alerts.send_startup()
-    await alerts.send_whale_signal({'token': 'TEST', 'value_usd': 5000, 'wallet': '0x1234'})
-    print("Install python-telegram-bot for real alerts")
+    async def send_rug_pull_alert(self, token: str, signals: List[str]):
+        sig_text = "\n".join(f"  • {s}" for s in signals)
+        await self._send(
+            f"🚨 <b>RUG PULL ALERT</b>\n"
+            f"Token: <code>{token}</code>\n"
+            f"Signals:\n{sig_text}\n"
+            f"Action: <b>EMERGENCY EXIT</b>"
+        )
+
+    async def send_whale_signal(self, trade: Dict):
+        token  = trade.get('token', '?')
+        amount = trade.get('value_usd', 0)
+        wallet = trade.get('wallet', 'Unknown')[:20]
+        await self._send(
+            f"🐋 <b>WHALE SIGNAL</b>\n"
+            f"Token:  <code>{token}</code>\n"
+            f"Amount: <b>${amount:,.0f}</b>\n"
+            f"Wallet: <code>{wallet}...</code>\n"
+            f"Time:   {datetime.now().strftime('%H:%M:%S')}"
+        )
+
+    async def send_sweep(self, usd: float, amount: float, token: str, tx_sig: str, cold: str):
+        await self._send(
+            f"💸 <b>PROFIT SWEEP</b>\n"
+            f"━━━━━━━━━━━━━━━━━━━━━━\n"
+            f"Swept: <b>${usd:.2f}</b> → <b>{amount:.4f} {token}</b>\n"
+            f"Cold:  <code>{cold[:20]}...</code>\n"
+            f"Tx:    <code>{tx_sig[:20]}...</code>"
+        )
+
+
+async def _test():
+    t = TelegramAlertManager("", "")
+    await t.send_startup()
+    print("TelegramAlertManager OK (no token configured)")
 
 if __name__ == "__main__":
-    asyncio.run(test())
+    asyncio.run(_test())

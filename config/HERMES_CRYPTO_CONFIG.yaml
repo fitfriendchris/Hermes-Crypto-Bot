@@ -46,15 +46,45 @@ account:
   min_trade_size_usd: 5.00        # $5 minimum
   compound: true                  # Reinvest profits
 
-# PROFIT PROTECTION
-# Move portion of profits to cold storage automatically
+# PROFIT PROTECTION (Legacy — use sweeper below instead)
 profit_protection:
   enabled: true
   cold_wallet_sol: ""        # PASTE SOL ADDRESS HERE (public)
   cold_wallet_eth: ""        # PASTE ETH ADDRESS HERE (public)
-  transfer_threshold_usd: 50   # Transfer when accumulated profit >= $50
-  transfer_pct: 0.25            # Move 25% to cold, keep 75% for reinvest
-  weekly_sweep: true            # Also sweep on Mondays if weekly PnL > threshold
+  transfer_threshold_usd: 50
+  transfer_pct: 0.25
+  weekly_sweep: true
+
+# ═══════════════════════════════════════════════════════════════
+# PROFIT SWEEPER
+# Auto-transfer realized profits to cold storage
+# ═══════════════════════════════════════════════════════════════
+sweeper:
+  # Mode: disabled | paper_log | sol | usdc | wbtc
+  #   disabled   = no sweeps
+  #   paper_log  = logs what WOULD happen (safe, default)
+  #   sol        = send native SOL to cold wallet
+  #   usdc       = swap SOL → USDC, send USDC to cold wallet
+  #   wbtc       = (not recommended on Solana liquidity)
+  mode: paper_log
+
+  # Accumulated profit must exceed this before a sweep triggers
+  threshold_usd: 50.0
+
+  # Portion of accumulated profit to sweep (0.0 - 1.0)
+  sweep_pct: 0.50
+
+  # Minimum SOL equivalent to sweep (prevents dust-sends)
+  min_sweep_sol: 0.01
+
+  # Cold wallet addresses (paste your real addresses here OR in .env)
+  cold_wallet_sol: ""
+  cold_wallet_eth: ""
+
+# Security: real cold addresses go in .env (not committed)
+#   COLD_WALLET_SOL=your_real_sol_address
+#   COLD_WALLET_ETH=your_real_eth_address
+# Settings in .env override these config values
 
 # SECURITY NOTICE
 # Private keys are NEVER stored in this file.

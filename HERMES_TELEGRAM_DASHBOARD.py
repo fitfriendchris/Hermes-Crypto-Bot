@@ -367,6 +367,27 @@ def back_keyboard():
 
 
 # ── FORMATTERS ──
+def format_sweeper_status() -> str:
+    """Load sweeper state and return a one-line status string."""
+    sweeper_path = os.path.join(_HERE, 'state', 'sweeper_state.json')
+    try:
+        if not os.path.exists(sweeper_path):
+            return "💤 Not active"
+        with open(sweeper_path, 'r') as f:
+            data = json.load(f)
+        mode = data.get('mode', '?')
+        accrued = data.get('accumulated_pnl', 0)
+        total = data.get('total_swept_usd', 0)
+        count = data.get('total_swept_count', 0)
+        if mode == 'disabled':
+            return "🔒 Disabled"
+        if total > 0:
+            return f"🧹 ${accrued:.0f} accrued | ${total:.0f} swept ({count}x)"
+        return f"⏳ ${accrued:.0f} accrued (thresh: $50)"
+    except Exception:
+        return "💤 No sweeper state"
+
+
 def format_true_balance() -> float:
     """Calculate true balance = cash + unrealized PnL."""
     state = load_bot_state()
@@ -411,7 +432,8 @@ def format_status(state: Dict, health: Dict) -> str:
         f"🔥 Consec Losses: <b>{cl}/5</b>\n"
         f"━━━━━━━━━━━━━━━━━━━━━━\n"
         f"Health: <b>{overall}</b>\n"
-        f"Mode: <b>PAPER</b> (simulated)\n"
+        f"Mode: <b>{'🔴 LIVE' if os.getenv('LIVE_MODE','false').lower()=='true' else '📄 PAPER'}</b>\n"
+        f"💸 Sweeper: <b>{format_sweeper_status()}</b>\n"
         f"⏰ <code>{datetime.now().strftime('%H:%M:%S')}</code>"
     )
 
@@ -458,58 +480,75 @@ def format_positions(state: Dict) -> str:
 
 
 def format_trades(state: Dict) -> str:
-    """Full trade history with running cumulative PnL after every trade."""
+    """Clean trade history — newest-first with cumulative PnL and summary."""
     history = state.get('history', [])
     if not history:
         return "📜 <b>NO TRADES YET</b>\n\nBot is waiting for first entry..."
 
-    lines = ["📜 <b>TRADE HISTORY LOG</b>", "━━━━━━━━━━━━━━━━━━━━━━"]
-    lines.append(f"{'#':<3} {'Token':<7} {'PnL $':<10} {'Return':<9} {'Reason':<24} {'Cum PnL $':<11}")
-    lines.append("-" * 72)
+    # Pre-compute cumulative PnL for every trade index (oldest->newest)
+    cum_pnl = []
+    running = 0.0
+    for t in history:
+        running += t.get('pnl', 0)
+        cum_pnl.append(running)
 
-    cum_pnl = 0.0
-    # Show trades newest-first so latest is at top (easy to read)
-    for idx, t in enumerate(reversed(history), 1):
+    lines = ["📜 <b>TRADE HISTORY LOG</b>", "━━━━━━━━━━━━━━━━━━━━━━"]
+
+    # Show newest first, but use pre-computed cumulative (correct chronological total)
+    for idx in range(len(history) - 1, -1, -1):
+        t = history[idx]
         pnl = t.get('pnl', 0)
         pnl_pct = t.get('pnl_pct', 0)
         reason = t.get('reason', '?')
         portion = t.get('portion', 1.0)
         portion_tag = " (P)" if portion < 0.99 else ""
-        cum_pnl += pnl
-
         emoji = "🟢" if pnl >= 0 else "🔴"
-        reason_short = reason[:22]
+
+        # Compact: limit width so Telegram never wraps weirdly
+        token_str = f"{t.get('token', '?')}{portion_tag}"
+        # Truncate insane returns for display
+        pct_str = f"{pnl_pct:+.1f}%"
+        if abs(pnl_pct) >= 10000:
+            pct_str = f"{pnl_pct:+.2e}"
+        pnl_str = f"${pnl:+.2f}"
+        cum_str = f"${cum_pnl[idx]:+.2f}"
+
         line = (
-            f"{emoji} {idx:<3} <b>{t.get('token', '?')}{portion_tag}</b> "
-            f"<code>${pnl:+7.2f}</code> "
-            f"<code>{pnl_pct:+7.1%}</code> "
-            f"{reason_short:<24} "
-            f"<code>${cum_pnl:+8.2f}</code>"
+            f"{emoji} <b>{token_str}</b>\n"
+            f"   └ {pnl_str}  ({pct_str})  →  Cum: <code>{cum_str}</code>\n"
+            f"      {reason}"
         )
         lines.append(line)
 
+    # ── Summary block ──
     total_trades = len(history)
     wins = sum(1 for t in history if t.get('pnl', 0) > 0)
     losses = total_trades - wins
     win_rate = wins / total_trades if total_trades > 0 else 0
     total_pnl = sum(t.get('pnl', 0) for t in history)
-
-    # Stats block
     avg_win = sum(t.get('pnl', 0) for t in history if t.get('pnl', 0) > 0) / wins if wins else 0
     avg_loss = sum(t.get('pnl', 0) for t in history if t.get('pnl', 0) <= 0) / losses if losses else 0
     best = max(history, key=lambda x: x.get('pnl', 0))
     worst = min(history, key=lambda x: x.get('pnl', 0))
 
     lines.append("━━━━━━━━━━━━━━━━━━━━━━")
-    lines.append(f"Total Trades: <b>{total_trades}</b> | Wins: <b>{wins}</b> | Losses: <b>{losses}</b>")
-    lines.append(f"Win Rate: <b>{win_rate:.0%}</b> | Avg Win: <b>${avg_win:+.2f}</b> | Avg Loss: <b>${avg_loss:+.2f}</b>")
-    lines.append(f"🏆 Best: <b>{best['token']}</b> ${best['pnl']:+.2f} | 💀 Worst: <b>{worst['token']}</b> ${worst['pnl']:+.2f}")
-    lines.append(f"<b>NET REALIZED PnL: ${total_pnl:+.2f}</b>")
+    lines.append(
+        f"Trades: <b>{total_trades}</b> | "
+        f"Wins: <b>{wins}</b> | "
+        f"Losses: <b>{losses}</b>\n"
+        f"Win Rate: <b>{win_rate:.0%}</b> | "
+        f"Avg Win: <b>${avg_win:+.2f}</b> | "
+        f"Avg Loss: <b>${avg_loss:+.2f}</b>"
+    )
+    lines.append(
+        f"🏆 Best: <b>{best['token']}</b> {best['pnl']:+.2f} | "
+        f"💀 Worst: <b>{worst['token']}</b> {worst['pnl']:+.2f}"
+    )
+    lines.append(f"\u003cb>📊 NET REALIZED PnL: ${total_pnl:+.2f}</b>")
 
-    text = "\n".join(lines)
-    # Telegram hard limit ~4096 chars; truncate if needed
+    text = "\n\n".join(lines)
     if len(text) > 4000:
-        cutoff = text[:4000].rfind('\n')
+        cutoff = text[:4000].rfind('\n\n')
         text = text[:cutoff] + "\n\n... (truncated — too many trades for one message)"
     return text
 
@@ -555,8 +594,8 @@ def format_pnl(state: Dict) -> str:
         f"Avg Win: <b>${avg_win:.2f}</b>\n"
         f"Avg Loss: <b>${avg_loss:.2f}</b>\n"
         f"━━━━━━━━━━━━━━━━━━━━━━\n"
-        f"🏆 Best: {best['token'] if best else 'N/A'} ${best['pnl']:.2f if best else 0}\n"
-        f"💀 Worst: {worst['token'] if worst else 'N/A'} ${worst['pnl']:.2f if worst else 0}"
+        f"🏆 Best:  {best['token'] if best else 'N/A'} ${best['pnl']:.2f if best else ''}\n"
+        f"💀 Worst: {worst['token'] if worst else 'N/A'} ${worst['pnl']:.2f if worst else ''}"
     )
 
 
@@ -617,19 +656,23 @@ def format_withdraw(state: Dict) -> str:
 
     # Get wallet addresses from .env or config
     wallet_info = []
-    cold_sol = os.getenv('COLD_WALLET_SOL', '')
-    cold_eth = os.getenv('COLD_WALLET_ETH', '')
+    cold_sol  = os.getenv('COLD_WALLET_SOL', '')
+    cold_eth  = os.getenv('COLD_WALLET_ETH', '')
     exodus_pk = os.getenv('EXODUS_PRIVATE_KEY', '')
-    phantom_pk = os.getenv('PHANTOM_PRIVATE_KEY', '')
 
+    # Show public addresses only — never show private key or prefix
     if cold_sol:
-        wallet_info.append(f"❄️ Cold SOL: <code>{cold_sol[:20]}...</code>")
+        wallet_info.append(f"❄️ Cold SOL: <code>{cold_sol}</code>")
     if cold_eth:
-        wallet_info.append(f"❄️ Cold ETH: <code>{cold_eth[:20]}...</code>")
+        wallet_info.append(f"❄️ Cold ETH: <code>{cold_eth}</code>")
     if exodus_pk:
-        wallet_info.append(f"👛 Exodus: <code>{exodus_pk[:15]}...</code>")
-    if phantom_pk:
-        wallet_info.append(f"👻 Phantom: <code>{phantom_pk[:15]}...</code>")
+        # Derive public key from private key — never expose the private key
+        try:
+            from solders.keypair import Keypair
+            kp = Keypair.from_base58_string(exodus_pk)
+            wallet_info.append(f"👛 Hot SOL: <code>{str(kp.pubkey())}</code>")
+        except Exception:
+            wallet_info.append("👛 Hot SOL: <i>key loaded (address unavailable)</i>")
 
     wallet_text = "\n".join(wallet_info) if wallet_info else "⚠️ No wallets configured in .env"
 

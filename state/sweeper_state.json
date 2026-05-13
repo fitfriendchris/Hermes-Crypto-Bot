@@ -1,0 +1,18 @@
+{
+  "mode": "sol",
+  "threshold_usd": 50.0,
+  "sweep_pct": 0.5,
+  "accumulated_pnl": 30.0,
+  "total_swept_usd": 30.0,
+  "total_swept_count": 1,
+  "sweep_history": [
+    {
+      "timestamp": "2026-05-12T22:13:09.665733",
+      "usd": 30.0,
+      "token": "SOL",
+      "amount": 0.3153247845280639,
+      "tx": "5yd9EvzFLuVGByBXqpfQF8YTgjGEqGxr6bvHrkTBQshEkPM1JGXSihrsYJLWqwoTvVoq6jEUZ1yyk3YnGXxLScah"
+    }
+  ],
+  "timestamp": "2026-05-12T22:13:09.666770"
+}

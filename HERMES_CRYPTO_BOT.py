@@ -83,6 +83,12 @@ try:
 except ImportError:
     SWAP_OK = False
 
+try:
+    from HERMES_profit_sweeper import ProfitSweeper
+    SWEEPER_OK = True
+except ImportError:
+    SWEEPER_OK = False
+
 # ── CONFIG ──
 CONFIG_PATH = os.path.join(_HERE, 'config', 'HERMES_CRYPTO_CONFIG.yaml')
 with open(CONFIG_PATH, 'r') as f:
@@ -93,6 +99,8 @@ load_dotenv()
 LIVE_MODE = os.getenv('LIVE_MODE', 'false').lower() == 'true'
 if LIVE_MODE:
     print("⚠️  LIVE MODE ENABLED — REAL TRADES WILL EXECUTE")
+
+SNIPER_CONFIG = CONFIG.get('sniper', {'position_size_pct': 0.05, 'auto_sell_r': 2.0})
 
 # ── LOGGING ──
 log_file = os.path.join(_HERE, 'logs', 'HERMES_CRYPTO_BOT.log')
@@ -193,9 +201,13 @@ if TELEGRAM_AVAILABLE:
     else:
         logger.warning("Telegram credentials missing - alerts disabled")
 
-profit_guard = ProfitProtection(CONFIG.get('profit_protection', {})) if PP_OK else None
+_pp_cfg = CONFIG.get('profit_protection', {})
+_pp_cfg['cold_wallet_sol'] = os.getenv('COLD_WALLET_SOL', '') or _pp_cfg.get('cold_wallet_sol', '')
+_pp_cfg['cold_wallet_eth'] = os.getenv('COLD_WALLET_ETH', '') or _pp_cfg.get('cold_wallet_eth', '')
+profit_guard = ProfitProtection(_pp_cfg) if PP_OK else None
 wallet = WalletManager() if WALLET_OK else None
 swap_manager = SwapManager(wallet) if SWAP_OK and wallet else None
+sweeper = ProfitSweeper(wallet, swap_manager) if SWEEPER_OK else None
 wallet_ready = False
 
 # ── WALLET INIT ──
@@ -225,11 +237,44 @@ async def init_wallet():
     try:
         wallet_ready = await wallet.initialize(chain=chain, wallet=preferred)
         if wallet_ready:
-            bal = await wallet.get_balance()
-            logger.info(f"Wallet ready: {preferred} | {wallet.get_address()[:20]}... | {bal:.4f} {chain.upper()}")
+            sol_balance = await wallet.get_balance()
+            logger.info(f"Wallet ready: {preferred} | {wallet.get_address()[:20]}... | {sol_balance:.4f} {chain.upper()}")
+
             if swap_manager:
                 await swap_manager.initialize()
                 logger.info("Swap manager initialized (Jupiter + Raydium)")
+
+            # ── Live balance sync: replace paper-inflated balance with real wallet value ──
+            if LIVE_MODE and swap_manager:
+                try:
+                    sol_price   = await swap_manager.get_sol_price()
+                    if sol_price <= 0:
+                        logger.warning("Live sync skipped — SOL price unavailable")
+                        raise ValueError("sol_price is 0")
+                    wallet_usd  = sol_balance * sol_price
+                    old_balance = state.balance
+
+                    if wallet_usd < old_balance * 0.5:
+                        # Paper balance far exceeds real wallet — this is a paper→live transition
+                        state.balance = wallet_usd
+
+                        # Drop paper positions that are on chains the hot wallet can't execute
+                        eth_pos = {k: v for k, v in state.positions.items()
+                                   if v.get('chain', 'solana') != 'solana'}
+                        for sym in list(eth_pos.keys()):
+                            del state.positions[sym]
+                        state.save()
+
+                        logger.info(
+                            f"LIVE SYNC: balance ${old_balance:.2f} → ${wallet_usd:.2f} "
+                            f"({sol_balance:.4f} SOL @ ${sol_price:.2f})"
+                        )
+                        if eth_pos:
+                            logger.info(f"Cleared {len(eth_pos)} paper ETH positions: {list(eth_pos.keys())}")
+                    else:
+                        logger.info(f"Balance already near wallet value (${old_balance:.2f} vs ${wallet_usd:.2f} real) — no sync needed")
+                except Exception as e:
+                    logger.warning(f"Live balance sync failed: {e}")
     except Exception as e:
         logger.warning(f"Wallet init failed: {e}")
 
@@ -581,6 +626,15 @@ async def paper_sell(sym: str, price: float, reason: str):
         if profit_guard:
             profit_guard.add_profit(pnl)
 
+    # ── PROFIT SWEEPER ──
+    if sweeper and pnl > 0:
+        sweeper.credit_pnl(pnl)
+        # Trigger immediate sweep check (async safe since paper_sell is async)
+        try:
+            await sweeper.check_and_sweep()
+        except Exception as e:
+            logger.warning(f"Sweeper check failed: {e}")
+
     result = {
         'token': sym,
         'entry': pos['entry'],
@@ -652,17 +706,167 @@ async def _send_trade_snapshot():
     except Exception as e:
         logger.warning(f"Trade snapshot failed: {e}")
 
-# ── LIVE TRADE PLACEHOLDERS ──
+# ── LIVE TRADE EXECUTION (Jupiter v6 — Solana only) ──
 async def live_buy(position: Dict):
-    if not wallet_ready:
-        logger.error("Wallet not ready for live trading")
+    """Buy token on-chain via Jupiter. Falls back to paper on non-SOL chains."""
+    if not wallet_ready or not swap_manager:
+        logger.error("Live buy blocked — wallet or swap manager not ready")
         return
-    logger.warning(f"LIVE BUY {position['token']} — DEX execution not yet implemented")
+
+    chain  = position.get('chain', 'solana')
+    sym    = position['token']
+    addr   = position.get('address', '')
+
+    if chain != 'solana' or not addr:
+        logger.info(f"LIVE BUY {sym} on {chain} — Solana-only; executing as paper")
+        await paper_buy(position)
+        return
+
+    invested_usd = position['invested']
+    lamports = await swap_manager.usd_to_lamports(invested_usd)
+    if lamports < 100_000:
+        logger.warning(f"LIVE BUY {sym} — too small ({lamports} lamports); skipping")
+        return
+
+    from HERMES_SWAP_EXECUTOR import SwapManager as _SM
+    result = await swap_manager.execute_swap(
+        input_mint=_SM.SOL_MINT,
+        output_mint=addr,
+        amount_in=lamports,
+        slippage_bps=300,
+    )
+
+    if result.success:
+        sol_price = await swap_manager.get_sol_price()
+        actual_usd = (lamports / 1e9) * sol_price
+        position['invested']  = actual_usd
+        position['quantity']  = result.output_amount
+        position['entry']     = actual_usd / result.output_amount if result.output_amount > 0 else position['entry']
+        position['tx_buy']    = result.tx_signature
+
+        state.balance -= actual_usd
+        state.positions[sym] = position
+        state.trades_today   += 1
+        logger.info(
+            f"LIVE BUY {sym}: ${actual_usd:.2f} @ {position['entry']:.6f} "
+            f"| qty={result.output_amount:.4f} | Tx: {result.tx_signature[:20]}..."
+        )
+        if alerts:
+            try:
+                await alerts.send_position_opened(position)
+            except Exception as e:
+                logger.warning(f"Alert failed: {e}")
+        await _send_trade_snapshot()
+    else:
+        logger.error(f"LIVE BUY {sym} FAILED: {result.error} — falling back to paper")
+        await paper_buy(position)
+
 
 async def live_sell(sym: str, price: float, reason: str):
-    if not wallet_ready:
+    """Sell token on-chain via Jupiter. Falls back to paper on non-SOL chains."""
+    if not wallet_ready or not swap_manager:
         return
-    logger.warning(f"LIVE SELL {sym} — DEX execution not yet implemented")
+
+    pos   = state.positions.get(sym)
+    if not pos:
+        return
+
+    chain = pos.get('chain', 'solana')
+    addr  = pos.get('address', '')
+
+    if chain != 'solana' or not addr:
+        logger.info(f"LIVE SELL {sym} on {chain} — Solana-only; executing as paper")
+        await paper_sell(sym, price, reason)
+        return
+
+    # Determine exit portion
+    tier_portions = {'tier_1': 0.25, 'tier_2': 0.25, 'tier_3': 0.25, 'tier_4': 0.15}
+    portion = 1.0
+    for tier_key, tier_pct in tier_portions.items():
+        if tier_key in reason:
+            portion = tier_pct
+            break
+
+    sell_qty      = pos['quantity'] * portion
+    token_decimals = pos.get('decimals', 6)      # Pump.fun tokens default to 6
+    raw_amount    = int(sell_qty * (10 ** token_decimals))
+
+    if raw_amount < 1:
+        logger.warning(f"LIVE SELL {sym} — sell amount rounds to 0 raw units; skipping")
+        return
+
+    from HERMES_SWAP_EXECUTOR import SwapManager as _SM
+    result = await swap_manager.execute_swap(
+        input_mint=addr,
+        output_mint=_SM.SOL_MINT,
+        amount_in=raw_amount,
+        slippage_bps=300,
+    )
+
+    if result.success:
+        sol_price   = await swap_manager.get_sol_price()
+        proceeds    = result.output_amount * sol_price
+        cost_basis  = pos['invested'] * portion
+        pnl         = proceeds - cost_basis
+
+        state.balance    += proceeds
+        state.daily_pnl  += pnl
+
+        if pnl < 0:
+            state.consecutive_losses += 1
+            record_stop_loss(sym)
+            set_symbol_cooldown(sym, hours=4.0)
+        else:
+            state.consecutive_losses = 0
+            if profit_guard:
+                profit_guard.add_profit(pnl)
+
+        if sweeper and pnl > 0:
+            sweeper.credit_pnl(pnl)
+            try:
+                await sweeper.check_and_sweep()
+            except Exception as e:
+                logger.warning(f"Sweeper check failed: {e}")
+
+        rec = {
+            'token':           sym,
+            'entry':           pos['entry'],
+            'exit':            price,
+            'invested':        cost_basis,
+            'proceeds':        proceeds,
+            'pnl':             pnl,
+            'pnl_pct':         pnl / cost_basis if cost_basis > 0 else 0,
+            'reason':          reason,
+            'hold_time_hours': round((datetime.now() - datetime.fromisoformat(pos['opened_at'])).total_seconds() / 3600, 1),
+            'highest_price':   pos['highest_price'],
+            'portion':         portion,
+            'tx_sell':         result.tx_signature,
+        }
+        state.history.append(rec)
+
+        if portion >= 0.99:
+            del state.positions[sym]
+            logger.info(f"LIVE SELL {sym}: FULL ${pnl:+.2f} ({pnl/cost_basis:+.2%}) | {reason} | Tx: {result.tx_signature[:20]}...")
+        else:
+            pos['quantity'] -= sell_qty
+            pos['invested'] -= cost_basis
+            logger.info(f"LIVE SELL {sym}: PARTIAL {portion:.0%} ${pnl:+.2f} | {reason} | Tx: {result.tx_signature[:20]}...")
+
+        record_symbol_trade(sym, pnl)
+
+        if alerts:
+            try:
+                await alerts.send_position_closed({
+                    'token': sym, 'pnl_pct': rec['pnl_pct'],
+                    'pnl_usd': pnl, 'reason': reason, 'portion': portion,
+                })
+            except Exception as e:
+                logger.warning(f"Alert failed: {e}")
+        await _send_trade_snapshot()
+
+    else:
+        logger.error(f"LIVE SELL {sym} FAILED: {result.error} — falling back to paper")
+        await paper_sell(sym, price, reason)
 
 # ── PRICE LOOKUP ──
 async def get_position_price(symbol: str, pos: Dict) -> Optional[float]:
@@ -962,6 +1166,22 @@ async def daily_report_loop():
         except Exception as e:
             logger.error(f"Daily report error: {e}")
 
+async def sweep_loop():
+    """Background loop: check profit sweeper every 5 minutes."""
+    while True:
+        await asyncio.sleep(300)
+        if sweeper:
+            try:
+                result = await sweeper.check_and_sweep()
+                if result and result.triggered:
+                    if result.dry_run:
+                        logger.info(f"💸 [DRY-RUN] Would sweep ${result.sweep_usd:.2f} to cold storage")
+                    elif result.tx_signature:
+                        logger.info(f"💸 SWEEPED ${result.sweep_usd:.2f} ({result.token_out}) | Tx: {result.tx_signature[:20]}...")
+            except Exception as e:
+                logger.warning(f"Sweep loop error: {e}")
+
+
 # ── MAIN ──
 async def main():
     logger.info("=" * 50)
@@ -1004,6 +1224,17 @@ async def main():
         except Exception as e:
             logger.warning(f"Startup alert failed: {e}")
 
+    # Initialize profit sweeper
+    if sweeper:
+        cold_status = f"cold={sweeper.cold_address[:15]}..." if sweeper.cold_address else "cold=NOT SET"
+        logger.info(
+            f"💸 Profit sweeper: ACTIVE | mode={sweeper.mode} | "
+            f"threshold=${sweeper.threshold} | "
+            f"{cold_status}"
+        )
+    else:
+        logger.info("💸 Profit sweeper: NOT LOADED")
+
     tasks = [
         asyncio.create_task(discovery_loop()),
         asyncio.create_task(sniper_loop()),
@@ -1012,6 +1243,9 @@ async def main():
         asyncio.create_task(save_loop()),
         asyncio.create_task(daily_report_loop()),
     ]
+
+    if sweeper:
+        tasks.append(asyncio.create_task(sweep_loop()))
 
     try:
         await asyncio.gather(*tasks)

@@ -137,31 +137,42 @@ class PhantomWallet:
         if not self.solana_available:
             logger.error("Cannot send: solana libraries missing")
             return None
-        
+
         try:
-            client = self.AsyncClient(self.rpc_endpoint)
-            keypair = self.Keypair.from_base58_string(self.private_key)
-            
+            from solana.rpc.async_api import AsyncClient
+            from solana.rpc.types import TxOpts
             from solders.system_program import TransferParams, transfer
-            from solders.transaction import Transaction
-            
-            # Build transaction
-            txn = Transaction()
-            txn.add(transfer(TransferParams(
+            from solders.message import MessageV0
+            from solders.transaction import VersionedTransaction
+
+            client = AsyncClient(self.rpc_endpoint)
+            keypair = self.Keypair.from_base58_string(self.private_key)
+            to_pubkey = self.Pubkey.from_string(to_address)
+
+            blockhash_resp = await client.get_latest_blockhash()
+            blockhash = blockhash_resp.value.blockhash
+
+            ix = transfer(TransferParams(
                 from_pubkey=keypair.pubkey(),
-                to_pubkey=self.Pubkey.from_string(to_address),
-                lamports=int(amount_sol * 1e9)
-            )))
-            
-            # Sign and send
-            txn.sign(keypair)
-            response = await client.send_transaction(txn)
+                to_pubkey=to_pubkey,
+                lamports=int(amount_sol * 1e9),
+            ))
+            msg = MessageV0.try_compile(
+                payer=keypair.pubkey(),
+                instructions=[ix],
+                address_lookup_table_accounts=[],
+                recent_blockhash=blockhash,
+            )
+            vtx = VersionedTransaction(msg, [keypair])
+
+            opts = TxOpts(skip_preflight=False, preflight_commitment="confirmed")
+            response = await client.send_raw_transaction(bytes(vtx), opts=opts)
             await client.close()
-            
+
             sig = str(response.value)
             logger.info(f"SOL sent: {amount_sol} to {to_address[:20]}... | Tx: {sig[:20]}...")
             return sig
-            
+
         except Exception as e:
             logger.error(f"Send SOL failed: {e}")
             return None
@@ -440,19 +451,35 @@ class ExodusWallet:
             return None
         try:
             from solana.rpc.async_api import AsyncClient
+            from solana.rpc.types import TxOpts
             from solders.system_program import TransferParams, transfer
-            from solders.transaction import Transaction
+            from solders.message import MessageV0
+            from solders.transaction import VersionedTransaction
+
             client = AsyncClient(self.SUPPORTED_CHAINS["solana"]["rpc"])
             keypair = self.Keypair.from_base58_string(self.private_key)
-            txn = Transaction()
-            txn.add(transfer(TransferParams(
+            to_pubkey = self.Pubkey.from_string(to_address)
+
+            blockhash_resp = await client.get_latest_blockhash()
+            blockhash = blockhash_resp.value.blockhash
+
+            ix = transfer(TransferParams(
                 from_pubkey=keypair.pubkey(),
-                to_pubkey=self.Pubkey.from_string(to_address),
-                lamports=int(amount_sol * 1e9)
-            )))
-            txn.sign(keypair)
-            resp = await client.send_transaction(txn)
+                to_pubkey=to_pubkey,
+                lamports=int(amount_sol * 1e9),
+            ))
+            msg = MessageV0.try_compile(
+                payer=keypair.pubkey(),
+                instructions=[ix],
+                address_lookup_table_accounts=[],
+                recent_blockhash=blockhash,
+            )
+            vtx = VersionedTransaction(msg, [keypair])
+
+            opts = TxOpts(skip_preflight=False, preflight_commitment="confirmed")
+            resp = await client.send_raw_transaction(bytes(vtx), opts=opts)
             await client.close()
+
             sig = str(resp.value)
             logger.info(f"Exodus sent {amount_sol:.4f} SOL → {to_address[:20]}... | Tx: {sig[:20]}...")
             return sig

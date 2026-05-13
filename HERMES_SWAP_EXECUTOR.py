@@ -104,9 +104,9 @@ class JupiterSwap:
         out_amount_raw = int(quote.get("outAmount", 0))
 
         # 2 — serialize via Jupiter
-        # Priority: PHANTOM_PRIVATE_KEY → EXODUS_PRIVATE_KEY
-        raw_key = (os.getenv("PHANTOM_PRIVATE_KEY", "").strip() or
-                   os.getenv("EXODUS_PRIVATE_KEY", "").strip())
+        # Priority: EXODUS_PRIVATE_KEY → PHANTOM_PRIVATE_KEY (use whichever is funded)
+        raw_key = (os.getenv("EXODUS_PRIVATE_KEY", "").strip() or
+                   os.getenv("PHANTOM_PRIVATE_KEY", "").strip())
         if not raw_key:
             return SwapResult(False, input_mint, output_mint, amount_in,
                               out_amount_raw / 1e9, price_impact,

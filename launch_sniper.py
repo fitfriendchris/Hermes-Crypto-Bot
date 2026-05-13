@@ -307,7 +307,8 @@ async def init_launch_sniper():
     logger.info("🎯 Launch sniper initialized")
     logger.info(f"  Liquidity threshold: ${SNIPER_CONFIG['liquidity_threshold_usd']:,}")
     logger.info(f"  Max market cap: ${SNIPER_CONFIG['max_mc_at_entry']:,}")
-    logger.info(f"  Auto-sell at: {SNIPER_CONFIG['auto_sell_r']}R")
+    logger.info(f"  Exit 1 at: {SNIPER_CONFIG['exit1_at_x']}× (sell 50%)")
+    logger.info(f"  Trail: {SNIPER_CONFIG['trail_pct']*100:.0f}% on remaining 50%")
     logger.info(f"  Time stop: {SNIPER_CONFIG['time_stop_minutes']} min")
 
 

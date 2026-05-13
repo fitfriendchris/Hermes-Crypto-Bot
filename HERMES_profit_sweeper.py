@@ -98,6 +98,22 @@ class ProfitSweeper:
         self.sweep_history: list = []
 
         self._load_state()
+        self._clear_paper_pnl_if_live()
+
+    def _clear_paper_pnl_if_live(self):
+        """Reset accumulated PnL on first live startup so paper profits don't trigger a real sweep."""
+        live = os.getenv('LIVE_MODE', 'false').lower() == 'true'
+        if not live or self.mode == 'paper_log' or self.mode == 'disabled':
+            return
+        state_flag = self.state_file.replace('.json', '_live_cleared.flag')
+        if not os.path.exists(state_flag) and self.accumulated_pnl > 0:
+            logger.warning(
+                f"Paper→Live transition detected: resetting accumulated_pnl "
+                f"${self.accumulated_pnl:.2f} → $0 to prevent false sweep"
+            )
+            self.accumulated_pnl = 0.0
+            self._save_state()
+            open(state_flag, 'w').close()
 
     # ── State persistence ──
 

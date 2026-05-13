@@ -2,7 +2,7 @@
   "mode": "sol",
   "threshold_usd": 50.0,
   "sweep_pct": 0.5,
-  "accumulated_pnl": 30.0,
+  "accumulated_pnl": 0.0,
   "total_swept_usd": 30.0,
   "total_swept_count": 1,
   "sweep_history": [

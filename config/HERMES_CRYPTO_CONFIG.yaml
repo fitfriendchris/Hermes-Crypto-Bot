@@ -260,26 +260,26 @@ stop_loss:
   trail_after_r: 2.0
 
   # Micro-cap specific
-  time_stop_hours: 48             # 2 day max hold (was 72) — don't let bags sit
+  time_stop_hours: 36             # 36h max hold — micro-cap pumps resolve in 24-36h
   momentum_stop: true
   liquidity_collapse_stop: true
   dev_sell_stop: true
 
 take_profit:
-  method: tiered                  # Tiered exit strategy
-  risk_reward_ratio: 5.0          # 5:1 minimum (micro-cap targets)
-  
-  # Tiered exit for runners
-  tier_1_r: 2.0                   # Sell 25% at 2R
-  tier_2_r: 5.0                   # Sell 25% at 5R
-  tier_3_r: 10.0                  # Sell 25% at 10R
-  tier_4_r: 50.0                  # Sell 15% at 50R (moon bag)
-  final_trail_pct: 0.20           # Trail final 10% at 20% below peak
-  
-  # Market cap milestones
-  mc_target_1: 1000000            # $1M MC — consider partial exit
-  mc_target_2: 10000000            # $10M MC — consider major exit
-  mc_target_3: 50000000            # $50M MC — likely full exit
+  method: two_tier_fast           # Optimized: take money fast, trail runners
+
+  # Exit 1: sell 50% at +20% → locks profit, moves stop to breakeven+2%
+  exit_1_pct: 0.20
+
+  # Exit 2: sell remaining 50% at +50%
+  exit_2_pct: 0.50
+
+  # Trailing stop: 12% below rolling peak (activates after Exit 1)
+  trail_pct: 0.12
+
+  # Legacy fields (kept for reference, not used by new exit logic)
+  tier_1_r: 1.33                  # +20% with 15% stop ≈ 1.33R
+  tier_2_r: 3.33                  # +50% with 15% stop ≈ 3.33R
 
 coin_selection:
   # Major anchors (stability)

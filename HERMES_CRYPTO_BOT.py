@@ -564,45 +564,45 @@ def check_exit(sym: str, price: float) -> Optional[str]:
             pos['stop_type'] = 'profit_floor'
             logger.info(f"🔒 {sym} profit floor locked at +5% (${floor_price:.6f}) after {hold_minutes:.0f}m")
 
-    # Phase 1: Breakeven at 2R (only if no tier has been hit yet)
-    if r >= 2.0 and pos['stop_type'] not in ('breakeven', 'trailing', 'profit_floor') and not any(pos['tier_exits'].values()):
-        be_price = pos['entry'] * 1.005
-        if be_price > pos['stop']:
-            pos['stop'] = be_price
-            pos['stop_type'] = 'breakeven'
-            logger.info(f"🛡️ {sym} moved to breakeven (${be_price:.6f})")
+    tp = CONFIG['take_profit']
+    exit1_pct  = float(tp.get('exit_1_pct', 0.20))   # sell 50% at +20%
+    exit2_pct  = float(tp.get('exit_2_pct', 0.50))   # sell 50% at +50%
+    trail_pct  = float(tp.get('trail_pct',  0.12))   # 12% trail after exit 1
 
-    # Phase 2: Trailing profit stop (once +50% unrealized, trail at 50% of peak gains)
-    if unrealized_pct >= 0.50:
-        trail_pct = 0.50  # allow 50% retracement of gains
-        trail_price = pos['highest_price'] * (1 - trail_pct * unrealized_pct)
-        min_trail = pos['entry'] * 1.10  # never below +10%
-        trail_price = max(trail_price, min_trail)
-        if trail_price > pos['stop']:
-            pos['stop'] = trail_price
-            pos['stop_type'] = 'trailing_profit'
-            logger.info(f"🎯 {sym} trailing profit stop @ ${trail_price:.6f}")
-
-    # Tiered exits — sequential, once each
-    tiers = CONFIG['take_profit']
-    if not pos['tier_exits']['1'] and r >= tiers['tier_1_r']:
+    # ── Exit 1: take 50% at +20% ──
+    # Triggered by price percentage from entry (not R, which breaks when stop moves above entry)
+    if not pos['tier_exits']['1'] and unrealized_pct >= exit1_pct:
         pos['tier_exits']['1'] = True
-        return f"tier_1_{tiers['tier_1_r']}R"
-    if not pos['tier_exits']['2'] and r >= tiers['tier_2_r']:
-        pos['tier_exits']['2'] = True
-        return f"tier_2_{tiers['tier_2_r']}R"
-    if not pos['tier_exits']['3'] and r >= tiers['tier_3_r']:
-        pos['tier_exits']['3'] = True
-        return f"tier_3_{tiers['tier_3_r']}R"
-    if not pos['tier_exits']['4'] and r >= tiers['tier_4_r']:
-        pos['tier_exits']['4'] = True
-        return f"tier_4_{tiers['tier_4_r']}R"
+        # Move hard stop to breakeven +2% so we can never lose on this trade
+        be_price = pos['entry'] * 1.02
+        if be_price > pos['stop']:
+            pos['stop']      = be_price
+            pos['stop_type'] = 'breakeven'
+            logger.info(f"🔒 {sym} stop → BE+2% (${be_price:.6f}) after Exit 1")
+        return "tier_1_exit1"
 
-    # Trailing stop after all tiers hit
-    if pos['tier_exits']['4']:
-        trail = pos['highest_price'] * (1 - tiers['final_trail_pct'])
-        if price <= trail:
-            return "trailing_stop"
+    # ── Trailing stop: 12% below peak once Exit 1 is taken ──
+    if pos['tier_exits']['1'] and not pos['tier_exits']['2']:
+        trail_price = pos['highest_price'] * (1 - trail_pct)
+        floor       = pos['entry'] * 1.02   # never trail below BE+2%
+        trail_price = max(trail_price, floor)
+        if trail_price > pos['stop']:
+            pos['stop']      = trail_price
+            pos['stop_type'] = 'trailing'
+            logger.info(f"📈 {sym} trailing stop → ${trail_price:.6f}")
+
+    # ── Exit 2: sell remaining 50% at +50% ──
+    if not pos['tier_exits']['2'] and unrealized_pct >= exit2_pct:
+        pos['tier_exits']['2'] = True
+        return "tier_2_exit2"
+
+    # ── Profit floor: if +10% after 30m, lock at +5% (never let a winner become a loser) ──
+    if hold_minutes >= 30 and unrealized_pct >= 0.10 and pos['stop_type'] not in ('profit_floor', 'breakeven', 'trailing'):
+        floor_price = pos['entry'] * 1.05
+        if floor_price > pos['stop']:
+            pos['stop']      = floor_price
+            pos['stop_type'] = 'profit_floor'
+            logger.info(f"🛡️ {sym} profit floor +5% (${floor_price:.6f})")
 
     return None
 
@@ -637,18 +637,12 @@ async def paper_sell(sym: str, price: float, reason: str):
     if not pos:
         return
 
-    # Determine exit portion based on tier
-    tier_portions = {
-        'tier_1': 0.25,
-        'tier_2': 0.25,
-        'tier_3': 0.25,
-        'tier_4': 0.15,
-    }
-    portion = 1.0
-    for tier_key, tier_pct in tier_portions.items():
-        if tier_key in reason:
-            portion = tier_pct
-            break
+    # 2-tier exit: Exit 1 → sell 50%, Exit 2 → sell remaining (100% of what's left)
+    # All other reasons (stop, time, trailing) → close full remaining position
+    if 'tier_1_exit1' in reason:
+        portion = 0.50
+    else:
+        portion = 1.0   # tier_2_exit2, stop_loss, time_stop, trailing — full exit
 
     sell_qty = pos['quantity'] * portion
     proceeds = sell_qty * price
@@ -823,13 +817,8 @@ async def live_sell(sym: str, price: float, reason: str):
         await paper_sell(sym, price, reason)
         return
 
-    # Determine exit portion
-    tier_portions = {'tier_1': 0.25, 'tier_2': 0.25, 'tier_3': 0.25, 'tier_4': 0.15}
-    portion = 1.0
-    for tier_key, tier_pct in tier_portions.items():
-        if tier_key in reason:
-            portion = tier_pct
-            break
+    # 2-tier exit: Exit 1 → sell 50%, everything else → full close
+    portion = 0.50 if 'tier_1_exit1' in reason else 1.0
 
     sell_qty      = pos['quantity'] * portion
     token_decimals = pos.get('decimals', 6)      # Pump.fun tokens default to 6

@@ -408,26 +408,65 @@ def record_stop_loss(sym: str):
     _save_cooldowns()
 
 def calc_stop(entry: float, token_data: Dict) -> tuple:
-    # Micro-caps need wider stops. Base 25%, never below 20%.
-    max_risk = max(CONFIG['stop_loss']['fixed_pct'], 0.25)
-    fixed_stop = entry * (1 - max_risk)
+    """
+    Tighter stop for sharper cut-losses.
+    Fixed: 15% max (was 25%). Volatility-adjusted: scale with 24h move but cap at 20%.
+    Tighter stops = smaller losses, higher R multiples on winners.
+    """
+    fixed_pct  = 0.15                      # 15% hard fixed stop
+    fixed_stop = entry * (1 - fixed_pct)
 
-    # Volatility-based override — wider stop for volatile micro-caps
-    change_24h = token_data.get('priceChange', {}).get('h24', 0)
-    if change_24h is not None and abs(change_24h) < 500:  # Allow up to 500% (micro-cap reality)
-        vol_stop = entry * (1 - min(abs(change_24h) * 0.015, 0.35))  # Cap at 35% max
-        vol_stop = max(entry * 0.65, vol_stop)  # NEVER below 35% of entry
+    change_24h = token_data.get('priceChange', {}).get('h24', 0) or 0
+    if abs(change_24h) < 300:
+        # Scale stop with volatility: 0.8% of 24h move, capped at 20%
+        vol_pct  = min(abs(float(change_24h)) * 0.008, 0.20)
+        vol_stop = entry * (1 - max(vol_pct, 0.10))   # never tighter than 10%
         if vol_stop > fixed_stop:
             return vol_stop, 'volatility'
 
     return fixed_stop, 'fixed'
 
+# ── SOCIAL / RUG QUALITY GATE ──
+# Tokens that have ZERO community presence AND zero social links are skipped
+# unless they have very high liquidity ($100K+) as a substitute signal.
+# This catches the garbage that passes volume/momentum but has no real community.
+
+def _passes_quality_gate(token: Dict) -> bool:
+    """
+    Community and rug quality gate.
+    A token needs at least ONE of:
+      - Website URL set
+      - Twitter/X URL set
+      - Telegram URL set
+      - Liquidity ≥ $100K (whales validate it with capital instead)
+    Anything with NONE of these is a ghost token — skip.
+    """
+    info = token.get('info', {}) or {}
+    socials = info.get('socials', []) or []
+    websites = info.get('websites', []) or []
+    liq = float(token.get('liquidity', {}).get('usd', 0))
+
+    has_website  = bool(websites)
+    has_social   = bool(socials)
+    has_liquidity = liq >= 100_000
+
+    if not has_website and not has_social and not has_liquidity:
+        sym = token.get('baseToken', {}).get('symbol') or token.get('symbol', '?')
+        logger.debug(f"🚫 {sym} — no website, no socials, no big liquidity (ghost token)")
+        return False
+    return True
+
+
 # ── ENTRY EVALUATION ──
 async def evaluate_entry(token: Dict) -> Optional[Dict]:
-    sym = token.get('baseToken', {}).get('symbol') or token.get('symbol', 'UNKNOWN')
+    sym   = token.get('baseToken', {}).get('symbol') or token.get('symbol', 'UNKNOWN')
     price = float(token.get('priceUsd', 0) or token.get('price', 0))
 
     if price <= 0:
+        return None
+
+    # ── COMMUNITY / RUG QUALITY GATE ──
+    if not _passes_quality_gate(token):
         return None
 
     # ── CHURN PROTECTION ──
@@ -444,46 +483,47 @@ async def evaluate_entry(token: Dict) -> Optional[Dict]:
         return None
     if state.consecutive_losses >= CONFIG['safety']['max_consecutive_losses']:
         return None
-        
+
     # ── SYMBOL LIFETIME FILTER ──
-    # Prevent re-trading micro-cap tokens (one-and-done rule)
     sym_upper = sym.upper()
     if not can_trade_symbol(sym_upper):
         return None
 
-    # Position sizing
-    risk_mult = 2.0 if CONFIG['aggressive_mode']['enabled'] else 1.0
+    # ── POSITION SIZING ──
+    # Reduced multiplier (1.5× instead of 2×) — less size per trade, more staying power
+    risk_mult = 1.5 if CONFIG['aggressive_mode']['enabled'] else 1.0
     size = state.balance * CONFIG['account']['max_risk_per_trade'] * risk_mult
     size = max(size, CONFIG['account']['min_trade_size_usd'])
-    if size > state.balance * 0.95:
-        size = state.balance * 0.95
+    if size > state.balance * 0.20:        # never more than 20% of balance per trade
+        size = state.balance * 0.20
 
-    # Stop loss
+    # ── STOP LOSS ──
     stop, stop_type = calc_stop(price, token)
     risk = (price - stop) / price
-
-    if risk > CONFIG['stop_loss']['fixed_pct']:
-        size = size * (CONFIG['stop_loss']['fixed_pct'] / risk)
+    if risk > 0.20:                        # hard cap: never risk more than 20% of entry
+        size = size * (0.20 / risk)
 
     quantity = size / price if price > 0 else 0
 
     return {
-        'token': sym.upper(),
-        'address': token.get('tokenAddress') or token.get('mint') or token.get('address'),
-        'chain': token.get('chainId', 'solana'),
-        'entry': price,
-        'quantity': quantity,
-        'invested': size,
-        'stop': stop,
-        'stop_type': stop_type,
-        'risk_pct': risk,
-        'opened_at': datetime.now().isoformat(),
-        'tier_exits': {'1': False, '2': False, '3': False, '4': False},
+        'token':        sym.upper(),
+        'address':      token.get('tokenAddress') or token.get('mint') or token.get('address'),
+        'chain':        token.get('chainId', 'solana'),
+        'entry':        price,
+        'quantity':     quantity,
+        'invested':     size,
+        'stop':         stop,
+        'stop_type':    stop_type,
+        'risk_pct':     risk,
+        'opened_at':    datetime.now().isoformat(),
+        'tier_exits':   {'1': False, '2': False, '3': False, '4': False},
         'highest_price': price,
-        'last_price': price,
-        'score': token.get('bot_score', 0),
-        'flags': token.get('bot_flags', []),
+        'last_price':   price,
+        'score':        token.get('bot_score', token.get('momentum_score', 0)),
+        'flags':        token.get('bot_flags', []),
         'pyramid_count': 0,
+        'has_socials':  bool(token.get('info', {}).get('socials')),
+        'has_website':  bool(token.get('info', {}).get('websites')),
     }
 
 # ── EXIT CHECK ──
@@ -620,12 +660,13 @@ async def paper_sell(sym: str, price: float, reason: str):
 
     if pnl < 0:
         state.consecutive_losses += 1
-        # ── COOLDOWN + CHURN TRACKING ──
         record_stop_loss(sym)
+        _block_reentry(sym)            # immediate 15-min block on any loss
         set_symbol_cooldown(sym, hours=4.0)
         logger.warning(f"🚫 {sym} cooldown 4h — stop-loss at {pnl/cost_basis:+.2%}")
     else:
         state.consecutive_losses = 0
+        _block_reentry(sym)            # also block re-entry after wins (let it breathe)
         if profit_guard:
             profit_guard.add_profit(pnl)
 
@@ -818,9 +859,11 @@ async def live_sell(sym: str, price: float, reason: str):
         if pnl < 0:
             state.consecutive_losses += 1
             record_stop_loss(sym)
+            _block_reentry(sym)
             set_symbol_cooldown(sym, hours=4.0)
         else:
             state.consecutive_losses = 0
+            _block_reentry(sym)
             if profit_guard:
                 profit_guard.add_profit(pnl)
 
@@ -872,40 +915,74 @@ async def live_sell(sym: str, price: float, reason: str):
         await paper_sell(sym, price, reason)
 
 # ── PRICE LOOKUP ──
-async def get_position_price(symbol: str, pos: Dict) -> Optional[float]:
-    """Get current price for a position."""
-    if not dex:
-        return pos.get('last_price', pos['entry'])
+_PRICE_SANITY_CAP = 15.0   # reject any single update that is >15× the entry price
 
-    # Try DexScreener token endpoint (not pair endpoint)
+async def get_position_price(symbol: str, pos: Dict) -> Optional[float]:
+    """Get current price. Rejects updates that are physically impossible."""
+    cached = pos.get('last_price', pos['entry'])
+    entry  = pos.get('entry', 0)
+
+    def _sanity(p: float) -> bool:
+        if p <= 0:
+            return False
+        # Allow up to 15× from ENTRY (meme coins can genuinely 10x)
+        if entry > 0 and p > entry * _PRICE_SANITY_CAP:
+            logger.warning(
+                f"🚨 {symbol} price ${p:.6f} is >{_PRICE_SANITY_CAP}× entry ${entry:.6f} "
+                f"— likely bad data, using cached ${cached:.6f}"
+            )
+            return False
+        # Also reject if price dropped to <0.1% of entry (contract migrated / dead)
+        if entry > 0 and p < entry * 0.001:
+            logger.warning(f"🚨 {symbol} price ${p:.6f} collapsed to <0.1% of entry — using cached")
+            return False
+        return True
+
+    if not dex:
+        return cached
+
+    # Try DexScreener token endpoint
     addr = pos.get('address')
-    chain = pos.get('chain', 'solana')
     if addr:
         try:
             price = await dex.get_token_price(symbol, addr)
-            if price and price > 0:
-                pos['last_price'] = price  # update cached price
+            if price and _sanity(price):
+                pos['last_price'] = price
                 return price
         except Exception:
             pass
 
-    # Fallback to search by symbol
+    # Fallback: search by symbol
     try:
         results = await dex.search_token(symbol)
         if results:
             p = float(results[0].get('priceUsd', 0))
-            if p > 0:
+            if _sanity(p):
                 pos['last_price'] = p
                 return p
     except Exception:
         pass
 
-    # FINAL fallback: use cached last price (NEVER decay it)
-    return pos.get('last_price', pos['entry'])
+    return cached
 
 # ── MAIN LOOPS ──
 
 paused = False
+
+# Recently-bought set: blocks re-entry for 15 min after any buy, regardless of lifetime tracking
+_recently_bought: Dict[str, datetime] = {}
+_REENTRY_BLOCK_MIN = 15
+
+def _block_reentry(sym: str):
+    _recently_bought[sym.upper()] = datetime.now()
+
+def _is_reentry_blocked(sym: str) -> bool:
+    ts = _recently_bought.get(sym.upper())
+    if ts and datetime.now() - ts < timedelta(minutes=_REENTRY_BLOCK_MIN):
+        return True
+    if sym.upper() in _recently_bought:
+        del _recently_bought[sym.upper()]
+    return False
 
 async def discovery_loop():
     """Scan DEXs for micro-cap opportunities and enter positions."""
@@ -926,10 +1003,22 @@ async def discovery_loop():
             tokens = await dex.discover_tokens("mixed", limit=50)  # Get more for filtering
             logger.info(f"Found {len(tokens)} eligible tokens")
 
-            for token in tokens[:10]:  # Check top 10
+            for token in tokens[:15]:  # Check top 15 (more candidates, stricter filters)
                 sym = token.get('baseToken', {}).get('symbol') or token.get('symbol', 'UNKNOWN')
 
                 if sym in state.positions:
+                    continue
+
+                # ── FAST REENTRY BLOCK (15 min after any buy/stop) ──
+                if _is_reentry_blocked(sym):
+                    logger.debug(f"⏱️ {sym} — reentry blocked ({_REENTRY_BLOCK_MIN}m cooldown)")
+                    continue
+
+                # ── PRE-FILTER: hard minimums before expensive momentum check ──
+                vol_24h = float(token.get('volume', {}).get('h24', 0))
+                liq_usd = float(token.get('liquidity', {}).get('usd', 0))
+                ch24h   = float(token.get('priceChange', {}).get('h24', 0))
+                if vol_24h < 50_000 or (liq_usd > 0 and liq_usd < 20_000) or ch24h > 500:
                     continue
 
                 # ── MOMENTUM FILTER ──
@@ -938,13 +1027,13 @@ async def discovery_loop():
                     if not enhanced:
                         continue
                     token = enhanced
-                    logger.info(f"📈 MOMENTUM: {sym} | Score: {token.get('momentum_score', 0)}")
+                    logger.info(f"📈 MOMENTUM: {sym} | Score: {token.get('momentum_score', 0):.0f}")
 
                 pos = await evaluate_entry(token)
                 if pos:
-                    # Tag source
                     pos['source'] = 'momentum' if MOMENTUM_OK else 'scanner'
                     pos['momentum_score'] = token.get('momentum_score', 0)
+                    _block_reentry(sym)   # ← lock out re-entry the moment we buy
 
                     if LIVE_MODE and wallet_ready:
                         await live_buy(pos)

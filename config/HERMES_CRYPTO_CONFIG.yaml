@@ -40,9 +40,9 @@ compliance:
 account:
   starting_balance_usd: 100.00
   current_balance_usd: 100.00
-  max_risk_per_trade: 0.08        # 8% of balance (reduced for sustainability)
-  max_open_positions: 5           # Reduced — micro-caps need focus, not scatter
-  max_drawdown_pct: 0.20          # Pause at 20% DD (protective)
+  max_risk_per_trade: 0.06        # 6% of balance — tighter sizing, more staying power
+  max_open_positions: 3           # Max 3 at once — focus, not scatter
+  max_drawdown_pct: 0.15          # Pause at 15% DD (tighter circuit)
   min_trade_size_usd: 5.00        # $5 minimum
   compound: true                  # Reinvest profits
 
@@ -187,14 +187,13 @@ execution:
   gas_priority: high              # Fast execution on DEX
 
 risk_filter:
-  # Micro-cap adjusted scoring
-  min_scam_score: 40              # Lower threshold (micro-caps riskier)
+  min_scam_score: 60              # Raised from 40 — must pass basic rug checks
   require_liquidity_locked: true
   require_audit: false            # Most micro-caps unaudited
-  max_holder_concentration: 0.50  # Top 10 < 50% (micro-cap reality)
-  min_volume_24h: 10000           # $10K daily ok for micro
-  min_liquidity_usd: 5000         # $5K liquidity minimum
-  max_contract_age_days: 7          # Allow fresh launches
+  max_holder_concentration: 0.40  # Top 10 < 40% (tighter than before)
+  min_volume_24h: 50000           # $50K daily minimum — eliminates ghost tokens
+  min_liquidity_usd: 20000        # $20K liquidity minimum — ensures exits work
+  max_contract_age_days: 7        # Allow fresh launches
   
   # Rug pull detection
   honey_pot_check: true
@@ -255,16 +254,16 @@ symbol_filter:
   use_market_structure: true
 
 stop_loss:
-  method: smart                   # structure > whale > fvg > liquidity > atr
-  fixed_pct: 0.25                 # 25% hard minimum for micro-caps (was 15%)
-  atr_multiplier: 3.0             # Wider for volatility
+  method: smart
+  fixed_pct: 0.15                 # 15% hard stop (was 25%) — cut losses faster
+  atr_multiplier: 2.0             # Tighter ATR multiplier
   trail_after_r: 2.0
-  
+
   # Micro-cap specific
-  time_stop_hours: 72             # 3 day max hold
-  momentum_stop: true             # Exit if volume drops 50%
-  liquidity_collapse_stop: true   # Exit if liquidity drops 30%
-  dev_sell_stop: true             # Exit if dev wallet sells >5%
+  time_stop_hours: 48             # 2 day max hold (was 72) — don't let bags sit
+  momentum_stop: true
+  liquidity_collapse_stop: true
+  dev_sell_stop: true
 
 take_profit:
   method: tiered                  # Tiered exit strategy
@@ -301,9 +300,9 @@ coin_selection:
     - whale_wallets                 # Whale accumulation
   
   # Filters
-  min_market_cap: 10000            # $10K minimum
+  min_market_cap: 100000           # $100K minimum — filters ghost tokens
   max_market_cap: 10000000        # $10M maximum (micro-cap zone)
-  min_volume_24h: 5000             # $5K daily
+  min_volume_24h: 50000            # $50K daily — real interest
   require_dex_listed: true
   max_age_hours: 168               # < 7 days old preferred
 

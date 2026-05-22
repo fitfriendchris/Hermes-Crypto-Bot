@@ -14,6 +14,9 @@ from typing import Dict, List, Optional, Any
 
 import aiohttp
 
+# Import symbol filter for whitelist checking
+from symbol_filter import SYMBOL_WHITELIST, SYMBOL_BLACKLIST
+
 logger = logging.getLogger('HighAttention')
 
 HERE = os.path.dirname(os.path.abspath(__file__))
@@ -64,7 +67,11 @@ class DexScreenerAPI:
             await self._session.close()
     
     async def get_token_data(self, mint: str) -> Optional[Dict[str, Any]]:
-        """Get real-time data for a specific token by mint."""
+        """Get real-time data for a specific token by mint.
+        
+        Tries tokens endpoint first, falls back to search by pair address.
+        """
+        # Method 1: Direct token endpoint
         url = f"{self.BASE_URL}/tokens/v1/solana/{mint}"
         try:
             async with self._session.get(url, timeout=10) as resp:
@@ -72,12 +79,64 @@ class DexScreenerAPI:
                     data = await resp.json()
                     pairs = data if isinstance(data, list) else data.get('pairs', [])
                     if pairs:
-                        # Pick the pair with highest liquidity
                         best = max(pairs, key=lambda p: float(p.get('liquidity', {}).get('usd', 0) or 0))
                         return self._normalize_token(best, mint)
-        except Exception as e:
-            logger.warning(f"DexScreener error for {mint}: {e}")
+        except Exception:
+            pass
+        
+        # Method 2: Search by mint address (DexScreener search)
+        search_url = f"{self.BASE_URL}/latest/dex/search?q={mint}"
+        try:
+            async with self._session.get(search_url, timeout=10) as resp:
+                if resp.status == 200:
+                    data = await resp.json()
+                    pairs = data.get('pairs', [])
+                    if pairs:
+                        # Filter for Solana pairs with this mint as base
+                        matching = [p for p in pairs if p.get('chainId') == 'solana']
+                        if matching:
+                            best = max(matching, key=lambda p: float(p.get('liquidity', {}).get('usd', 0) or 0))
+                            return self._normalize_token(best, mint)
+        except Exception:
+            pass
+        
+        # Method 3: Search by token symbol name
+        try:
+            # Try to get symbol from watchlist or known tokens
+            symbol = None
+            for w in self._watchlist_fallback():
+                if w.get('mint') == mint:
+                    symbol = w.get('symbol')
+                    break
+            
+            if symbol:
+                search_url2 = f"{self.BASE_URL}/latest/dex/search?q={symbol}"
+                async with self._session.get(search_url2, timeout=10) as resp:
+                    if resp.status == 200:
+                        data = await resp.json()
+                        pairs = data.get('pairs', [])
+                        if pairs:
+                            # Find pair with matching base token
+                            for p in pairs:
+                                base = p.get('baseToken', {}).get('address', '')
+                                if base == mint:
+                                    return self._normalize_token(p, mint)
+                            # Fallback: just use first Solana pair
+                            sol_pairs = [p for p in pairs if p.get('chainId') == 'solana']
+                            if sol_pairs:
+                                best = max(sol_pairs, key=lambda p: float(p.get('liquidity', {}).get('usd', 0) or 0))
+                                return self._normalize_token(best, mint)
+        except Exception:
+            pass
+        
+        logger.warning(f"DexScreener: No data found for mint {mint}")
         return None
+    
+    def _watchlist_fallback(self):
+        """Fallback watchlist for symbol lookup."""
+        return [
+            {'symbol': 'ATTENTION', 'mint': '52xfJnaHZzxAddm74SVyxmdyLJ6qrrW8WN2U3SjmxaVB'},
+        ]
     
     async def get_trending_tokens(self, limit: int = 50) -> List[Dict[str, Any]]:
         """Get trending Solana tokens."""
@@ -275,7 +334,9 @@ class HighAttentionEngine:
         stop_pct = 0.50  # 50% stop (vs 35% for established)
         
         position = {
+            'token': symbol,  # Bot compatibility
             'symbol': symbol,
+            'address': token.get('mint', ''),  # Bot compatibility
             'token_address': token.get('mint', ''),
             'entry': entry_price,
             'invested': size,
@@ -315,46 +376,71 @@ class HighAttentionEngine:
         Uses the original logic.
         """
         symbol = token.get('symbol', 'UNKNOWN')
+        sym_upper = symbol.upper()
         
-        # Hard filters
+        # Check if whitelist symbol — relaxed criteria
+        is_whitelist = sym_upper in SYMBOL_WHITELIST
+        
+        # Hard filters (relaxed for whitelist AND early discoveries)
+        is_early = token.get('age_minutes', 999) < 60 or token.get('source') == 'dexscreener_new'
         liquidity = token.get('liquidity_usd', 0)
-        if liquidity < self.config['min_liquidity']:
-            logger.debug(f"💧 {symbol} liquidity too low: ${liquidity:.0f}")
+        min_liq = 5000 if (is_whitelist or is_early) else self.config['min_liquidity']
+        if liquidity < min_liq:
+            logger.debug(f"💧 {symbol} liquidity too low: ${liquidity:.0f} < ${min_liq}")
             return None
         
         volume_24h = token.get('volume_24h', 0)
-        if volume_24h < self.config['min_volume_24h']:
-            logger.debug(f"📉 {symbol} 24h volume too low: ${volume_24h:.0f}")
+        min_vol = 5000 if (is_whitelist or is_early) else self.config['min_volume_24h']
+        if volume_24h < min_vol:
+            logger.debug(f"📉 {symbol} 24h volume too low: ${volume_24h:.0f} < ${min_vol}")
             return None
         
         holders = token.get('holder_count', 0)
-        if holders < self.config['min_holders']:
-            logger.debug(f"👥 {symbol} holder count too low: {holders}")
+        min_holders = 0 if (is_whitelist or is_early) else self.config['min_holders']
+        if holders < min_holders and not (is_whitelist or is_early):
+            logger.debug(f"👥 {symbol} holder count too low: {holders} < {min_holders}")
             return None
         
-        # Volume spike detection
+        # Volume spike detection — relaxed for whitelist AND early discoveries
         volume_1h = token.get('volume_1h', 0)
-        if not self.detect_volume_spike(symbol, volume_1h):
+        has_spike = self.detect_volume_spike(symbol, volume_1h)
+        if not has_spike and not (is_whitelist or is_early):
             logger.debug(f"📊 {symbol} no volume spike detected")
             return None
+        elif not has_spike and (is_whitelist or is_early):
+            logger.info(f"📊 {symbol} {'WHITELIST' if is_whitelist else 'EARLY'} — bypassing volume spike check")
+        else:
+            logger.info(f"📊 {symbol} volume spike confirmed")
         
-        # Price action check
+        # Price action check — relaxed for whitelist
         change_1h = token.get('change_1h', 0)
-        if change_1h < 1.0:
-            logger.debug(f"📉 {symbol} 1h change too low: {change_1h:.2f}%")
+        min_change = -5.0 if is_whitelist else 1.0  # Whitelist can be down -5%, others need +1%
+        if change_1h < min_change:
+            logger.debug(f"📉 {symbol} 1h change too low: {change_1h:.2f}% < {min_change}%")
             return None
         
-        # Skip if already up too much
+        # Skip if already up too much (relaxed for early discoveries)
         change_24h = token.get('change_24h', 0)
-        if change_24h > 300:
-            logger.debug(f"🚀 {symbol} already up {change_24h:.0f}% — chasing")
+        max_24h = 2000 if is_early else (500 if is_whitelist else 300)
+        if change_24h > max_24h:
+            logger.debug(f"🚀 {symbol} already up {change_24h:.0f}% — chasing (max {max_24h}%)")
+            return None
+        elif change_24h < -50 and not is_whitelist:
+            # Skip if dumping hard (unless whitelist)
+            logger.debug(f"📉 {symbol} dumping: {change_24h:.1f}%")
             return None
         
-        # Position sizing
-        position_pct = self.config['position_pct']
+        # Position sizing — WHITELIST gets Kelly sizing
+        if is_whitelist:
+            from symbol_filter import get_position_size_pct
+            position_pct = get_position_size_pct(sym_upper, self.config['position_pct'])
+            logger.info(f"📊 {symbol} WHITELIST position: {position_pct*100:.1f}% of balance")
+        else:
+            position_pct = self.config['position_pct']
+        
         size = balance * position_pct
-        size = max(size, 5.0)
-        size = min(size, 100.0)
+        size = max(size, 2.50)  # Your $2.50 minimum
+        size = min(size, 50.0)  # Cap at $50
         
         # Slippage estimate
         if liquidity > 0:
@@ -363,6 +449,11 @@ class HighAttentionEngine:
                 size = liquidity * 0.02
                 logger.info(f"📐 {symbol} position capped at ${size:.2f} due to slippage")
         
+        # FINAL MINIMUM CHECK
+        if size < 2.50:
+            logger.warning(f"💰 {symbol} position ${size:.2f} below $2.50 minimum — SKIPPED")
+            return None
+        
         entry_price = token.get('price_usd', 0)
         if entry_price <= 0:
             return None
@@ -370,7 +461,9 @@ class HighAttentionEngine:
         quantity = size / entry_price
         
         position = {
+            'token': symbol,  # Bot compatibility
             'symbol': symbol,
+            'address': token.get('mint', ''),  # Bot compatibility
             'token_address': token.get('mint', ''),
             'entry': entry_price,
             'invested': size,
@@ -395,8 +488,8 @@ class HighAttentionEngine:
         logger.info(
             f"🔥 HIGH-ATTENTION ENTRY: {symbol} | "
             f"Price: ${entry_price:.6f} | Size: ${size:.2f} | "
-            f"1h: +{change_1h:.1f}% | Vol spike: {volume_1h:.0f} | "
-            f"Liq: ${liquidity:.0f}"
+            f"1h: {change_1h:+.1f}% | Vol: ${volume_1h:.0f} | "
+            f"Liq: ${liquidity:.0f} | {'WHITELIST' if is_whitelist else 'DISCOVERED'}"
         )
         
         return position

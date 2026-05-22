@@ -1444,7 +1444,8 @@ async def high_attention_loop():
                         break
         
         except Exception as e:
-            logger.error(f"High-attention loop error: {e}")
+            import traceback
+            logger.error(f"High-attention loop error: {e}\n{traceback.format_exc()}")
         
         await asyncio.sleep(15)  # 15s cycle — fast for high-attention tokens
 

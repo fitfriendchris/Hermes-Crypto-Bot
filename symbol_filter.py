@@ -24,10 +24,11 @@ SYMBOL_WHITELIST = {
     'Bufo':       {'wr': 0.46, 'avg_r': 3.2, 'score': 78},
     'UFO':        {'wr': 1.00, 'avg_r': 2.5, 'score': 95},
     'FRELLE':     {'wr': 0.43, 'avg_r': 2.8, 'score': 76},
-    'GAYTES':     {'wr': 0.60, 'avg_r': 2.0, 'score': 80},  # From recent trades
-    'BULL':       {'wr': 0.55, 'avg_r': 2.2, 'score': 78},  # From recent trades
-    'MASCOTS':    {'wr': 0.50, 'avg_r': 1.8, 'score': 72},  # From recent trades
-    'ROYALPOP':   {'wr': 0.50, 'avg_r': 1.5, 'score': 70},  # Small sample
+    'GAYTES':     {'wr': 0.60, 'avg_r': 2.0, 'score': 80},
+    'BULL':       {'wr': 0.55, 'avg_r': 2.2, 'score': 78},
+    'MASCOTS':    {'wr': 0.50, 'avg_r': 1.8, 'score': 72},
+    'ROYALPOP':   {'wr': 0.50, 'avg_r': 1.5, 'score': 70},
+    'ATTENTION':  {'wr': 0.50, 'avg_r': 2.0, 'score': 75},  # Active micro-cap
 }
 
 # DYNAMIC SYMBOL SCORING — Update after every trade

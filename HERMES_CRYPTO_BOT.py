@@ -757,6 +757,10 @@ def check_exit(sym: str, price: float) -> Optional[str]:
     if price <= pos['stop']:
         return f"stop_loss_{pos['stop_type']}"
 
+    # Get mode config from position
+    mode_tag = pos.get('mode_at_entry', MODE_COPY)
+    mode_cfg = CONFIG.get('modes', {}).get(mode_tag, {})
+
     # Time stop — per mode (PUMP.FUN uses 2h max)
     opened = datetime.fromisoformat(pos['opened_at'])
     

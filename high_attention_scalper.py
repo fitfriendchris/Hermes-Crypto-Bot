@@ -9,7 +9,7 @@ import asyncio
 import json
 import logging
 import os
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
 from typing import Dict, List, Optional, Any
 
 import aiohttp
@@ -347,6 +347,7 @@ class HighAttentionEngine:
             'last_price': entry_price,
             'stop': stop_price,
             'stop_type': 'fixed',
+            'opened_at': datetime.now(timezone.utc).isoformat(),
             'source': 'pumpfun',
             'mode_at_entry': 'HIGH_ATTENTION',
             'momentum_score': token.get('reply_count', 0),  # Use replies as momentum
@@ -484,6 +485,7 @@ class HighAttentionEngine:
             'last_price': entry_price,
             'stop': stop_price,
             'stop_type': 'fixed',
+            'opened_at': datetime.now(timezone.utc).isoformat(),
             'source': 'high_attention',
             'mode_at_entry': 'HIGH_ATTENTION',
             'momentum_score': change_1h,

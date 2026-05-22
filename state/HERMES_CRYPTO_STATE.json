@@ -37,7 +37,8 @@
       "last_price": 0.002597,
       "highest_price": 0.002766,
       "stop": 0.0022128,
-      "stop_type": "fixed"
+      "stop_type": "fixed",
+      "opened_at": "2026-05-22T22:24:33.519830+00:00"
     },
     "FISHJAK": {
       "token": "FISHJAK",
@@ -75,7 +76,8 @@
       "highest_price": 0.0002341,
       "last_price": 0.0002341,
       "stop": 0.00018728,
-      "stop_type": "fixed"
+      "stop_type": "fixed",
+      "opened_at": "2026-05-22T22:24:33.519830+00:00"
     },
     "BBUTT": {
       "token": "BBUTT",
@@ -114,7 +116,8 @@
       "highest_price": 0.04226559706358114,
       "last_price": 0.04226559706358114,
       "stop": 0.03381247765086492,
-      "stop_type": "fixed"
+      "stop_type": "fixed",
+      "opened_at": "2026-05-22T22:24:33.519830+00:00"
     },
     "POOR": {
       "token": "POOR",
@@ -153,7 +156,8 @@
       "highest_price": 0.04479498366913971,
       "last_price": 0.04479498366913971,
       "stop": 0.03583598693531177,
-      "stop_type": "fixed"
+      "stop_type": "fixed",
+      "opened_at": "2026-05-22T22:24:33.519830+00:00"
     },
     "JAMES": {
       "token": "JAMES",
@@ -192,7 +196,8 @@
       "highest_price": 0.04490129606794648,
       "last_price": 0.04490129606794648,
       "stop": 0.035921036854357186,
-      "stop_type": "fixed"
+      "stop_type": "fixed",
+      "opened_at": "2026-05-22T22:24:33.519830+00:00"
     }
   },
   "history": [
@@ -389,5 +394,5 @@
   "halt_reason": "",
   "day_start_balance": 90.78,
   "week_start_balance": 90.78,
-  "timestamp": "2026-05-22T17:22:20.970002"
+  "timestamp": "2026-05-22T17:24:16.567575"
 }

@@ -247,7 +247,7 @@ class HighAttentionEngine:
         """Block re-entry for configured hours."""
         self.recently_bought[symbol.upper()] = datetime.now()
     
-    def detect_volume_spike(self, symbol: str, volume_1h: float) -> bool:
+    def detect_volume_spike(self, symbol: str, volume_1h: float, volume_24h: float = 0) -> bool:
         """Detect if volume is spiking above threshold."""
         history = self.volume_history.get(symbol, [])
         history.append(volume_1h)
@@ -256,17 +256,25 @@ class HighAttentionEngine:
             history = history[-24:]
         self.volume_history[symbol] = history
         
-        if len(history) < 6:  # Need at least 6 hours of data
-            return False
+        # Method 1: History-based (needs 6+ hours)
+        if len(history) >= 6:
+            avg_volume = sum(history[:-1]) / len(history[:-1])  # Exclude current
+            threshold = self.config.get('volume_spike_threshold', 3.0)
+            spike = volume_1h > (avg_volume * threshold)
+            if spike:
+                logger.info(f"📊 {symbol} volume spike: {volume_1h:.0f} vs avg {avg_volume:.0f} ({volume_1h/avg_volume:.1f}x)")
+            return spike
         
-        avg_volume = sum(history[:-1]) / len(history[:-1])  # Exclude current
-        threshold = self.config.get('volume_spike_threshold', 3.0)
-        spike = volume_1h > (avg_volume * threshold)
+        # Method 2: Fresh token — compare 1h vs avg 24h hourly rate
+        if volume_24h > 0 and volume_1h > 0:
+            avg_hourly_24h = volume_24h / 24
+            threshold = self.config.get('volume_spike_threshold', 3.0)
+            spike = volume_1h > (avg_hourly_24h * threshold)
+            if spike:
+                logger.info(f"📊 {symbol} volume spike (fresh): {volume_1h:.0f} vs 24h avg {avg_hourly_24h:.0f} ({volume_1h/avg_hourly_24h:.1f}x)")
+            return spike
         
-        if spike:
-            logger.info(f"📊 {symbol} volume spike: {volume_1h:.0f} vs avg {avg_volume:.0f} ({volume_1h/avg_volume:.1f}x)")
-        
-        return spike
+        return False
     
     def evaluate_entry(self, token: Dict, balance: float) -> Optional[Dict]:
         """
@@ -407,13 +415,25 @@ class HighAttentionEngine:
             logger.debug(f"📉 {symbol} 24h volume too low: ${volume_24h:.0f} < $5K")
             return None
         
-        # 3. VOLUME SPIKE — must be spiking NOW (catches early moves)
+        # 3. VOLUME — must be active (spiking OR consistently high)
         volume_1h = token.get('volume_1h', 0)
-        has_spike = self.detect_volume_spike(symbol, volume_1h)
-        if not has_spike:
-            logger.debug(f"📊 {symbol} NO VOLUME SPIKE — SKIPPED")
+        volume_24h = token.get('volume_24h', 0)
+        
+        # Volume thresholds: whitelist = lower, unknown = higher
+        min_volume_1h = 10_000 if is_whitelist else 50_000  # $10K for whitelist, $50K for unknown
+        high_volume = volume_1h >= min_volume_1h
+        
+        # Option A: Volume spike (3x average)
+        has_spike = self.detect_volume_spike(symbol, volume_1h, volume_24h)
+        
+        if not has_spike and not high_volume:
+            logger.debug(f"📊 {symbol} NO VOLUME ACTIVITY — SKIPPED (1h=${volume_1h:.0f}, need ${min_volume_1h:,})")
             return None
-        logger.info(f"📊 {symbol} volume spike confirmed: ${volume_1h:.0f}")
+        
+        if has_spike:
+            logger.info(f"📊 {symbol} volume spike: ${volume_1h:.0f}")
+        else:
+            logger.info(f"📊 {symbol} volume OK: ${volume_1h:.0f}")
         
         # 4. PRICE ACTION — must be green 1h (momentum)
         change_1h = token.get('change_1h', 0)
@@ -448,6 +468,12 @@ class HighAttentionEngine:
         momentum = token.get('momentum_score', change_1h)
         if momentum < 5.0 and not is_whitelist:
             logger.debug(f"📊 {symbol} momentum too weak: {momentum:.1f} < 5")
+            return None
+        
+        # 10. HOLDERS — basic check
+        holders = token.get('holder_count', 0)
+        if holders < 10 and not is_whitelist:
+            logger.debug(f"👥 {symbol} too few holders: {holders} < 10")
             return None
         
         # ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━

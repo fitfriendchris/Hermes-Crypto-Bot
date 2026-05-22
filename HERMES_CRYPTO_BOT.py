@@ -820,7 +820,9 @@ def _check_exit_pumpfun(sym: str, pos: Dict, price: float) -> Optional[str]:
         # 30% trail — Pump.fun is volatile
         trail_price = pos['highest_price'] * 0.70
         floor = pos['entry'] * 1.05
-        trail_price = max(trail_price, floor)
+        # ABSOLUTE FLOOR: stop can never go below 35% of entry (catastrophic loss limit)
+        catastrophe_floor = pos['entry'] * 0.35
+        trail_price = max(trail_price, floor, catastrophe_floor)
         if trail_price > pos['stop']:
             pos['stop'] = trail_price
             pos['stop_type'] = 'trailing'
@@ -866,7 +868,9 @@ def _check_exit_sniper(sym: str, pos: Dict, price: float, mode_cfg: Dict) -> Opt
     if pos['tier_exits']['1']:
         trail_price = pos['highest_price'] * (1 - trail_pct)
         floor = pos['entry'] * 1.002
-        trail_price = max(trail_price, floor)
+        # ABSOLUTE FLOOR: stop can never go below 35% of entry
+        catastrophe_floor = pos['entry'] * 0.35
+        trail_price = max(trail_price, floor, catastrophe_floor)
         if trail_price > pos['stop']:
             pos['stop'] = trail_price
             pos['stop_type'] = 'trailing'
@@ -913,7 +917,9 @@ def _check_exit_copy(sym: str, pos: Dict, price: float, mode_cfg: Dict) -> Optio
             effective_trail = trail_low
         trail_price = pos['highest_price'] * (1 - effective_trail)
         floor = pos['entry'] * 1.02
-        trail_price = max(trail_price, floor)
+        # ABSOLUTE FLOOR: stop can never go below 35% of entry
+        catastrophe_floor = pos['entry'] * 0.35
+        trail_price = max(trail_price, floor, catastrophe_floor)
         if trail_price > pos['stop']:
             pos['stop'] = trail_price
             pos['stop_type'] = 'trailing'

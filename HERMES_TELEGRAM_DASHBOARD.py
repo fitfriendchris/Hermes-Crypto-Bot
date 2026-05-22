@@ -16,10 +16,18 @@ from datetime import datetime, timedelta
 from typing import Dict, List, Optional, Tuple
 
 import httpx
-from dotenv import load_dotenv
 
 _HERE = os.path.dirname(os.path.abspath(__file__))
-load_dotenv(os.path.join(_HERE, '.env'))
+
+# Load .env manually (python-dotenv has bugs with find_dotenv)
+_env_path = os.path.join(_HERE, '.env')
+if os.path.exists(_env_path):
+    with open(_env_path) as f:
+        for line in f:
+            line = line.strip()
+            if line and not line.startswith('#') and '=' in line:
+                key, val = line.split('=', 1)
+                os.environ[key] = val
 
 logging.basicConfig(
     level=logging.INFO,

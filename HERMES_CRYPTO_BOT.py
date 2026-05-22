@@ -1041,7 +1041,19 @@ async def paper_sell(sym: str, price: float, reason: str):
     else:
         pos['quantity'] -= sell_qty
         pos['invested'] -= cost_basis
-        logger.info(f"PAPER SELL {sym}: PARTIAL {portion:.0%} ${pnl:+.2f} ({pnl/cost_basis:+.2%}) | {reason} | remaining qty={pos['quantity']:.4f}")
+        
+        # CHECK: remaining position must be >= $2.50 to swap back to SOL
+        remaining_value = pos['quantity'] * price
+        if remaining_value < 2.50:
+            logger.warning(
+                f"💰 {sym} remaining ${remaining_value:.2f} below $2.50 min — "
+                f"CLOSING FULL POSITION instead of partial"
+            )
+            # Sell the rest too
+            del state.positions[sym]
+            logger.info(f"PAPER SELL {sym}: FULL (forced, below min) | {reason}")
+        else:
+            logger.info(f"PAPER SELL {sym}: PARTIAL {portion:.0%} ${pnl:+.2f} ({pnl/cost_basis:+.2%}) | {reason} | remaining qty={pos['quantity']:.4f}")
 
     # ── RECORD SYMBOL TRADE FOR LIFETIME TRACKING ──
     record_symbol_trade(sym, pnl)
@@ -1286,7 +1298,19 @@ async def live_sell(sym: str, price: float, reason: str):
         else:
             pos['quantity'] -= sell_qty
             pos['invested'] -= cost_basis
-            logger.info(f"LIVE SELL {sym}: PARTIAL {portion:.0%} ${pnl:+.2f} | {reason} | Tx: {result.tx_signature[:20]}...")
+            
+            # CHECK: remaining position must be >= $2.50 to swap back to SOL
+            remaining_value = pos['quantity'] * price
+            if remaining_value < 2.50:
+                logger.warning(
+                    f"💰 {sym} remaining ${remaining_value:.2f} below $2.50 min — "
+                    f"CLOSING FULL POSITION instead of partial"
+                )
+                # Sell the rest too
+                del state.positions[sym]
+                logger.info(f"LIVE SELL {sym}: FULL (forced, below min) | {reason} | Tx: {result.tx_signature[:20]}...")
+            else:
+                logger.info(f"LIVE SELL {sym}: PARTIAL {portion:.0%} ${pnl:+.2f} | {reason} | Tx: {result.tx_signature[:20]}...")
 
         record_symbol_trade(sym, pnl)
 

@@ -998,7 +998,16 @@ async def paper_sell(sym: str, price: float, reason: str):
     sell_qty = pos['quantity'] * portion
     proceeds = sell_qty * price
     cost_basis = pos['invested'] * portion
-    pnl = proceeds - cost_basis
+    gross_pnl = proceeds - cost_basis
+    
+    # ACCOUNT FOR SWAP FEES: subtract round-trip fees from PnL
+    from fee_calculator import calculate_net_pnl
+    fee_adjusted = calculate_net_pnl(gross_pnl, cost_basis)
+    pnl = fee_adjusted['net_pnl']  # Use net PnL for all tracking
+    fees = fee_adjusted['fees_usd']
+    
+    if fees > 0:
+        logger.info(f"💸 {sym} fees: ${fees:.3f} (roundtrip), gross=${gross_pnl:+.2f}, net=${pnl:+.2f}")
 
     state.balance += proceeds
     state.daily_pnl += pnl
@@ -1258,7 +1267,16 @@ async def live_sell(sym: str, price: float, reason: str):
         sol_price   = await swap_manager.get_sol_price()
         proceeds    = result.output_amount * sol_price
         cost_basis  = pos['invested'] * portion
-        pnl         = proceeds - cost_basis
+        gross_pnl   = proceeds - cost_basis
+        
+        # ACCOUNT FOR SWAP FEES: subtract round-trip fees from PnL
+        from fee_calculator import calculate_net_pnl
+        fee_adjusted = calculate_net_pnl(gross_pnl, cost_basis)
+        pnl = fee_adjusted['net_pnl']
+        fees = fee_adjusted['fees_usd']
+        
+        if fees > 0:
+            logger.info(f"💸 {sym} fees: ${fees:.3f} (roundtrip), gross=${gross_pnl:+.2f}, net=${pnl:+.2f}")
 
         state.balance    += proceeds
         state.daily_pnl  += pnl

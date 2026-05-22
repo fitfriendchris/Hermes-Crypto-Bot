@@ -156,8 +156,13 @@ class ProfitSweeper:
         """Called by the bot after every realized trade."""
         if pnl_usd <= 0:
             return  # only sweep profits, not losses
-        self.accumulated_pnl += pnl_usd
-        logger.info(f"Sweeper credited ${pnl_usd:.2f} | accrued=${self.accumulated_pnl:.2f}")
+        
+        # ACCOUNT FOR SWEEP FEES: each sweep costs ~0.5% (swap to SOL + transfer)
+        sweep_fee_pct = 0.005  # 0.5%
+        net_pnl = pnl_usd * (1 - sweep_fee_pct)
+        
+        self.accumulated_pnl += net_pnl
+        logger.info(f"Sweeper credited ${net_pnl:.2f} (after {sweep_fee_pct:.1%} sweep fee) | accrued=${self.accumulated_pnl:.2f}")
         self._save_state()
 
     # ── Check + trigger ──

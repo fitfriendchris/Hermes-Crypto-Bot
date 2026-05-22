@@ -452,7 +452,16 @@ class HighAttentionEngine:
             position_pct = self.config['position_pct']
         
         size = balance * position_pct
-        size = max(size, 2.50)  # Your $2.50 minimum
+        
+        # ACCOUNT FOR SWAP FEES: reduce gross size so net position ≥ $2.50
+        from fee_calculator import apply_entry_cost, estimate_swap_cost
+        net_size = apply_entry_cost(size)
+        if net_size < size:
+            fee_info = estimate_swap_cost(size)
+            logger.info(f"💸 {symbol} fees: ${fee_info['entry_cost_usd']:.2f} entry, ${fee_info['roundtrip_cost_usd']:.2f} roundtrip")
+            size = net_size
+        
+        size = max(size, 2.50)  # Your $2.50 minimum (net, after fees)
         size = min(size, 50.0)  # Cap at $50
         
         # Slippage estimate — can reduce size below $2.50
@@ -462,9 +471,9 @@ class HighAttentionEngine:
                 size = liquidity * 0.02
                 logger.info(f"📐 {symbol} position capped at ${size:.2f} due to slippage")
         
-        # FINAL MINIMUM CHECK — after ALL sizing logic
+        # FINAL MINIMUM CHECK — after ALL sizing logic (including fees)
         if size < 2.50:
-            logger.warning(f"💰 {symbol} position ${size:.2f} below $2.50 minimum — SKIPPED")
+            logger.warning(f"💰 {symbol} position ${size:.2f} below $2.50 minimum (after fees) — SKIPPED")
             return None
         
         # Hard cap at $50

@@ -11,7 +11,7 @@ import logging
 import os
 import sys
 from collections import defaultdict
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
 from typing import Dict, List, Optional
 
 import aiohttp
@@ -771,7 +771,7 @@ def check_exit(sym: str, price: float) -> Optional[str]:
         hold_hours = float(mode_cfg.get('time_stop_hours',
                                          CONFIG.get('stop_loss', {}).get('time_stop_hours', 72)))
     
-    if datetime.now() - opened > timedelta(hours=hold_hours):
+    if datetime.now(timezone.utc) - opened > timedelta(hours=hold_hours):
         return "time_stop"
 
     # Pump.fun has its own exit logic

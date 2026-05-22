@@ -1028,7 +1028,7 @@ async def paper_sell(sym: str, price: float, reason: str):
         'pnl': pnl,
         'pnl_pct': pnl / cost_basis if cost_basis > 0 else 0,
         'reason': reason,
-        'hold_time_hours': round((datetime.now() - datetime.fromisoformat(pos['opened_at'])).total_seconds() / 3600, 1),
+        'hold_time_hours': round((datetime.now(timezone.utc) - datetime.fromisoformat(pos['opened_at'])).total_seconds() / 3600, 1),
         'highest_price': pos['highest_price'],
         'portion': portion,
     }
@@ -1273,7 +1273,7 @@ async def live_sell(sym: str, price: float, reason: str):
             'pnl':             pnl,
             'pnl_pct':         pnl / cost_basis if cost_basis > 0 else 0,
             'reason':          reason,
-            'hold_time_hours': round((datetime.now() - datetime.fromisoformat(pos['opened_at'])).total_seconds() / 3600, 1),
+            'hold_time_hours': round((datetime.now(timezone.utc) - datetime.fromisoformat(pos['opened_at'])).total_seconds() / 3600, 1),
             'highest_price':   pos['highest_price'],
             'portion':         portion,
             'tx_sell':         result.tx_signature,

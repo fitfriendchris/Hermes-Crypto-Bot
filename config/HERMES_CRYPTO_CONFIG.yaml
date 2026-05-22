@@ -40,11 +40,18 @@ compliance:
 account:
   starting_balance_usd: 100.00
   current_balance_usd: 100.00
-  max_risk_per_trade: 0.09        # 9% — 54% of Kelly optimal (47% WR, 2.33 R:R → Kelly=25%)
-  max_open_positions: 4           # 4 simultaneous — more compounding surface
-  max_drawdown_pct: 0.15          # Pause at 15% DD
-  min_trade_size_usd: 5.00
-  compound: true                  # Reinvest profits — critical for exponential growth
+  # Survival sizing — 1.5% per trade. Quarter-Kelly equivalent for fat-tail asset class
+  # where ~98% of memecoins go to zero. Equal-weight portfolio of many small bets.
+  max_risk_per_trade: 0.015
+  max_open_positions: 20          # Equal-weight diversification across many small bets
+  position_size_hard_cap_pct: 0.05  # Absolute ceiling per position (5% bankroll)
+  # Risked-dollars budget per trade. With wide 35-55% stops, position size scales
+  # *down* on wider stops so risk stays bounded. 0.6% bankroll = 0.6% loss on a
+  # stop-out — survivable with 20 concurrent positions and daily circuit at 2%.
+  risk_budget_per_trade_pct: 0.006
+  max_drawdown_pct: 0.15            # Pause at 15% DD
+  min_trade_size_usd: 1.00          # Allows $1.50 positions at 1.5% on $100
+  compound: true                    # Reinvest profits
 
 # PROFIT PROTECTION (Legacy — use sweeper below instead)
 profit_protection:
@@ -253,28 +260,92 @@ symbol_filter:
   use_volume_profile: true
   use_market_structure: true
 
-stop_loss:
-  method: smart
-  fixed_pct: 0.15                 # 15% hard stop (was 25%) — cut losses faster
-  atr_multiplier: 2.0             # Tighter ATR multiplier
-  trail_after_r: 2.0
+# ═══════════════════════════════════════════════════════════════
+# BOT MODES — standalone strategy configs, toggleable from Telegram.
+# Active mode is owned by bot_mode.py (state/bot_mode.json), NOT by these flags.
+# These dictate the *rules* each mode uses when active.
+# Positions are tagged with mode_at_entry; exits dispatch by that tag, so
+# flipping modes does not change behavior on already-open trades.
+# ═══════════════════════════════════════════════════════════════
+modes:
+  default_on_first_run: OFF       # OFF | SNIPER | COPY
 
-  # Micro-cap specific
-  time_stop_hours: 36             # 36h max hold — micro-cap pumps resolve in 24-36h
+  SNIPER:
+    description: "Fast scalp — momentum + launch sniper entries, quick take-profits, tight stops."
+    entries:
+      momentum_scanner: true
+      launch_sniper: true
+      copy_trader: false
+    stop_floor_pct: 0.08          # 8% — tight is OK here, we WANT fast cuts
+    stop_cap_pct: 0.20
+    vol_scaler: 0.003             # tighter than micro-cap path
+    time_stop_hours: 4            # 4h — fast in/out
+    take_profit:
+      strategy: scaled_quick
+      tier_1_pct: 0.03            # sell 33% at +3%
+      tier_1_portion: 0.33
+      tier_2_pct: 0.06            # sell 33% at +6%
+      tier_2_portion: 0.33
+      tier_3_pct: 0.10            # sell remainder at +10%
+      tier_3_portion: 1.0
+      trail_pct: 0.04             # 4% trail after tier 1
+
+  COPY:
+    description: "Mirror verified whale wallets (90d PnL). Our exits: 2x principal recovery + wide trail."
+    entries:
+      momentum_scanner: false
+      launch_sniper: false
+      copy_trader: true
+    stop_floor_pct: 0.35          # 35% — survives memecoin normal vol
+    stop_cap_pct: 0.55
+    vol_scaler: 0.005
+    time_stop_hours: 72
+    take_profit:
+      strategy: principal_recovery
+      principal_recovery_r: 1.0   # +100% unrealized → sell entry-cost units
+      scaled_5x_portion: 0.25
+      scaled_10x_portion: 0.25
+      trail_pct_low: 0.25         # 20-100%: 25% trail
+      trail_pct_mid: 0.20         # 100-500%: 20% trail
+      trail_pct_high: 0.15        # 500%+: 15% trail
+
+  OFF:
+    description: "No new entries. Monitor + exit existing positions under their original mode's rules."
+
+# Legacy keys kept for backward compatibility with code paths not yet migrated.
+# The active mode's config above takes precedence in new exit dispatch.
+strategies:
+  dex_arb: { enabled: false }
+  scalp_meanrev: { enabled: false }
+
+stop_loss:
+  method: volatility_floor
+  # Micro-cap / memecoin entries. Normal intraday vol is 20-50%; a tight 10-15%
+  # stop bleeds on noise AND cuts winners that need to breathe through the
+  # initial chop. Wider stop + small size + 72h time-stop is the survival shape.
+  # Risked $ per trade = position_size × stop_width ≈ 1.5% × 35% = 0.5% bankroll.
+  floor_pct: 0.35                 # never tighter than -35%
+  cap_pct: 0.55                   # never wider than -55%
+  atr_multiplier: 2.5             # for scalp sleeve w/ candle feed (atr_stop_from_candles)
+  trail_after_r: 2.0
+  time_stop_hours: 72             # 3 days — primary exit on faded moves
   momentum_stop: true
   liquidity_collapse_stop: true
   dev_sell_stop: true
 
 take_profit:
-  method: trail_only              # Pure trailing — no fixed exit cap, lets runners run
-
-  # Exit 1: lock profit, set up trail
-  exit_1_pct: 0.20                # Sell 50% at +20% → moves stop to BE+2%
-
-  # No fixed Exit 2 — progressive trailing does it:
-  #   +20% to +50%:  trail 10% below peak
-  #   +50% to +100%: trail 8%  below peak
-  #   +100%+:        trail 6%  below peak (locks almost all gains on mega-runners)
+  method: tiered_with_principal_recovery
+  # Principal-recovery rule: at 2x, sell entry_cost / current_price units (locks principal)
+  principal_recovery_r: 1.0        # 1R = entry; +100% unrealized = 2x
+  # Scaled exits on the moon bag after principal recovery
+  scaled_exit_5x_pct: 0.25         # sell 25% of remainder at 5x
+  scaled_exit_10x_pct: 0.25        # sell 25% of remainder at 10x
+  # Trailing on whatever's left
+  trail_pct_low: 0.25              # 20-100%: 25% trail
+  trail_pct_mid: 0.20              # 100-500%: 20% trail
+  trail_pct_high: 0.15             # 500%+: 15% trail
+  # Legacy exit_1 keys kept so existing code paths don't break
+  exit_1_pct: 0.20
   trail_pct: 0.10
 
 coin_selection:
@@ -314,28 +385,30 @@ logging:
   daily_report: true
   pnl_update_interval: 300        # 5 min PnL updates
 
-# AGGRESSIVE GROWTH SETTINGS
+# AGGRESSIVE GROWTH SETTINGS — DISABLED under survival-sizing regime.
+# Fat-tail asset classes punish concentrated bets. Aggressive multipliers and
+# fomo-override sizing reintroduce ruin risk. Re-enable only after 30+ days
+# of live profitability with PF >1.4.
 aggressive_mode:
-  enabled: true
-  pyramiding: true                # Add to winners
-  pyramiding_trigger: 2.0         # Add when position up 2R
-  max_pyramid_adds: 2             # Max 2 additions
-  
-  dip_buying: true                # Buy dips on trending coins
-  dip_threshold: 0.20             # Buy 20% dip from local high
-  
-  fomo_override: true             # If 3+ whales buy same new coin in 1h
-  fomo_position_size: 0.15        # 15% on fomo (high risk)
-  
-  ico_presale: false               # NO presales (too risky)
-  airdrop_farming: false           # NO airdrops (time waste)
+  enabled: false
+  pyramiding: false
+  pyramiding_trigger: 2.0
+  max_pyramid_adds: 0
+  dip_buying: false
+  dip_threshold: 0.20
+  fomo_override: false
+  fomo_position_size: 0.015
+  ico_presale: false
+  airdrop_farming: false
 
-# SAFETY CIRCUITS
+# SAFETY CIRCUITS — percent-of-bankroll. Scales with account size automatically.
 safety:
-  max_daily_loss_usd: 25.00        # Stop trading if -$25 day
-  max_weekly_loss_usd: 50.00      # Stop if -$50 week
-  max_consecutive_losses: 5       # Pause after 5 losses
-  cooldown_hours: 24              # 24h cooldown after circuit
+  max_daily_loss_pct: 0.02         # -2% bankroll/day → 24h pause
+  max_weekly_loss_pct: 0.05        # -5% bankroll/week → 7d pause
+  max_daily_loss_usd: 2.00         # Legacy absolute floor — pct check takes precedence
+  max_weekly_loss_usd: 5.00
+  max_consecutive_losses: 5
+  cooldown_hours: 24
   
   # Rug pull emergency
   instant_exit_signals:
@@ -357,3 +430,26 @@ targets:
   expected_avg_winner: 5.0         # 5R average win
   expected_avg_loser: 1.0         # 1R average loss
   expected_expectancy: 0.75        # Positive expectancy
+
+# LLM BRAIN (Ollama) — veto-only entry gate + narrative re-ranker.
+# This block is documentation; runtime behavior is controlled by env vars
+# in .env so flipping it on doesn't require a config re-deploy.
+# Set USE_LLM_BRAIN=true in .env to enable. Default: OFF (rule-only).
+llm_brain:
+  enabled: false                   # env: USE_LLM_BRAIN
+  url: "http://localhost:11434"    # env: OLLAMA_URL
+  model_fast: "kimi-k2.6:cloud"    # env: OLLAMA_MODEL_FAST — kimi with think:false, ~2-8s/call
+  model_deep: ""                   # env: OLLAMA_MODEL_DEEP — leave empty when fast is already kimi
+  timeout_s: 15                    # env: LLM_TIMEOUT_S — kimi typically 2-8s, headroom for outliers
+  escalate_band: "0.35,0.65"       # env: LLM_ESCALATE_BAND — only relevant if model_deep set
+  log_path: "data/llm_decisions.jsonl"
+  # Verified 2026-05-18 with kimi-k2.6:cloud + think:false:
+  #   Real established token  → score 0.95, no veto, 2.0s
+  #   Copycat of famous token → score 0.05, veto, 2.6s
+  #   Junk pump-and-dump      → score 0.05, veto, 5.4s
+  #   Strong narrative token  → score 92/100, 7.6s
+  # Safety contract:
+  #   - VETO-ONLY: brain can block a rule-approved trade, never create one.
+  #   - Any timeout / error / parse failure returns NEUTRAL verdict (no veto).
+  #   - Narrative re-ranking blends only 15% LLM into total_score.
+  #   - Reasoning models (kimi) need think:false to stay fast — set in hermes_brain.py.

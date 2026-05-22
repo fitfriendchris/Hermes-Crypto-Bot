@@ -307,9 +307,73 @@ async def answer_callback(query_id: str, text: str):
 
 
 # ── KEYBOARDS ──
+def _active_mode() -> str:
+    """Read current bot mode from state/bot_mode.json. 'OFF' if missing."""
+    try:
+        mode_path = os.path.join(_HERE, 'state', 'bot_mode.json')
+        with open(mode_path) as f:
+            return json.load(f).get('mode', 'OFF')
+    except Exception:
+        return 'OFF'
+
+
+def _set_bot_mode(new_mode: str) -> str:
+    """Atomically flip the active mode. Returns a status string for the user.
+
+    The mode file is read by the main bot's entry loops every iteration, so
+    new entries pick up the change within seconds. Open positions are NOT
+    affected — they continue to exit under their mode_at_entry rules.
+    """
+    valid = ('OFF', 'SNIPER', 'COPY')
+    if new_mode not in valid:
+        return f"❌ Invalid mode: {new_mode}"
+    try:
+        mode_path = os.path.join(_HERE, 'state', 'bot_mode.json')
+        os.makedirs(os.path.dirname(mode_path), exist_ok=True)
+        tmp = mode_path + '.tmp'
+        from datetime import datetime as _dt
+        with open(tmp, 'w') as f:
+            json.dump({
+                'mode': new_mode,
+                'changed_at': _dt.utcnow().isoformat(),
+                'reason': 'telegram_dashboard',
+            }, f, indent=2)
+        os.replace(tmp, mode_path)
+    except Exception as e:
+        return f"❌ Failed to set mode: {e}"
+
+    descriptions = {
+        'SNIPER': ("🎯 <b>SNIPER MODE</b>\n"
+                   "Fast scalps — momentum + launch sniper entries.\n"
+                   "Exits: +3% → +6% → +10% scaled, 4% trail, 4h time-stop."),
+        'COPY': ("🐋 <b>COPY MODE</b>\n"
+                 "Mirroring 90-day-verified wallets.\n"
+                 "Exits: 2x principal recovery, 5x/10x scaled, wide trail, 72h time-stop."),
+        'OFF': ("⏸ <b>PAUSED</b>\n"
+                "No new entries. Open positions continue to exit under "
+                "their original mode's rules."),
+    }
+    return descriptions.get(new_mode, f"Mode set to {new_mode}")
+
+
+def _mode_label(mode_key: str) -> str:
+    """Render a mode button with ✅ prefix if it's currently active."""
+    active = _active_mode()
+    icons = {'SNIPER': '🎯 SNIPER MODE', 'COPY': '🐋 COPY MODE', 'OFF': '⏸ PAUSE'}
+    label = icons.get(mode_key, mode_key)
+    return f"✅ {label}" if active == mode_key else label
+
+
 def main_menu_keyboard():
     return {
         "inline_keyboard": [
+            [
+                {"text": _mode_label('SNIPER'), "callback_data": "mode_SNIPER"},
+                {"text": _mode_label('COPY'),   "callback_data": "mode_COPY"},
+            ],
+            [
+                {"text": _mode_label('OFF'),    "callback_data": "mode_OFF"},
+            ],
             [
                 {"text": "📊 STATUS", "callback_data": "cmd_status"},
                 {"text": "📈 PnL", "callback_data": "cmd_pnl"}
@@ -432,7 +496,8 @@ def format_status(state: Dict, health: Dict) -> str:
         f"🔥 Consec Losses: <b>{cl}/5</b>\n"
         f"━━━━━━━━━━━━━━━━━━━━━━\n"
         f"Health: <b>{overall}</b>\n"
-        f"Mode: <b>{'🔴 LIVE' if os.getenv('LIVE_MODE','false').lower()=='true' else '📄 PAPER'}</b>\n"
+        f"Execution: <b>{'🔴 LIVE' if os.getenv('LIVE_MODE','false').lower()=='true' else '📄 PAPER'}</b>\n"
+        f"Strategy: <b>{_active_mode()}</b>\n"
         f"💸 Sweeper: <b>{format_sweeper_status()}</b>\n"
         f"⏰ <code>{datetime.now().strftime('%H:%M:%S')}</code>"
     )
@@ -728,8 +793,19 @@ async def handle_command(chat_id: str, text: str):
     elif cmd == 'withdraw':
         msg = format_withdraw(state) if state else "❌ State unavailable"
         await send_message(chat_id, msg, main_menu_keyboard())
+    elif cmd.startswith('mode'):
+        # /mode sniper | /mode copy | /mode off — text fallback for the buttons
+        parts = text.strip().split()
+        if len(parts) == 1:
+            await send_message(chat_id,
+                f"Active mode: <b>{_active_mode()}</b>\nUsage: /mode sniper | /mode copy | /mode off",
+                main_menu_keyboard())
+        else:
+            target = parts[1].upper()
+            result = _set_bot_mode(target)
+            await send_message(chat_id, result, main_menu_keyboard())
     else:
-        await send_message(chat_id, f"Unknown: {text}\nTry: /start /status /positions /pnl /trades /health /restart /config /withdraw")
+        await send_message(chat_id, f"Unknown: {text}\nTry: /start /status /positions /pnl /trades /health /mode /restart /config /withdraw")
 
 
 async def handle_callback(query: dict):
@@ -740,6 +816,14 @@ async def handle_callback(query: dict):
 
     state = load_bot_state()
     health = full_health_check()
+
+    # Mode toggles — flips state/bot_mode.json which the main bot watches each tick.
+    if data.startswith('mode_'):
+        new_mode = data.split('_', 1)[1]
+        result = _set_bot_mode(new_mode)
+        await edit_message(chat_id, msg_id, result, main_menu_keyboard())
+        await answer_callback(query_id, f"Mode → {new_mode}")
+        return
 
     if data == 'cmd_menu':
         await edit_message(chat_id, msg_id, "🏛️ Hermes Crypto Command Center", main_menu_keyboard())

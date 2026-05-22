@@ -2,11 +2,14 @@
 .env
 *.pem
 *.key
+.secrets/
 
 # Bot state (contains wallet addresses)
 bot_state.json
+state/*.json
 
 # Logs — can contain sensitive data
+logs/
 crypto_bot.log
 *.log
 

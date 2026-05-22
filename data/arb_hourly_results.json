@@ -1,0 +1,15 @@
+{
+  "initial_balance": 10000.0,
+  "final_balance": 12561.189586805538,
+  "total_return_pct": 25.611895868055377,
+  "total_trades": 26,
+  "closed_trades": 26,
+  "wins": 25,
+  "losses": 1,
+  "win_rate": 0.9615384615384616,
+  "avg_win": 120.18714569127086,
+  "avg_loss": -241.4512247933838,
+  "profit_factor": 12.4442468446907,
+  "max_drawdown_pct": 2.2384900136326396,
+  "total_fees": 202.03783068284747
+}

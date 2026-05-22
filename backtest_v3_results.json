@@ -1,0 +1,85 @@
+{
+  "results": {
+    "baseline": {
+      "strategy": "baseline",
+      "trades": 92,
+      "win_rate": 0.2608695652173913,
+      "avg_win": 1.7505311813764848,
+      "avg_loss": -1.236533665833491,
+      "profit_factor": 0.4996503950315102,
+      "expectancy_per_trade": -0.45729935786567116,
+      "final_balance": 57.928459076358195,
+      "peak_balance": 100.0,
+      "max_drawdown_pct": 0.42071540923641804,
+      "total_return_pct": -0.42071540923641804
+    },
+    "survival": {
+      "strategy": "survival",
+      "trades": 82,
+      "win_rate": 0.18292682926829268,
+      "avg_win": 0.64201400424782,
+      "avg_loss": -0.27624636736708963,
+      "profit_factor": 0.5203126467612275,
+      "expectancy_per_trade": -0.10827190914485006,
+      "final_balance": 91.12170345012223,
+      "peak_balance": 100.0,
+      "max_drawdown_pct": 0.08878296549877775,
+      "total_return_pct": -0.08878296549877773
+    }
+  },
+  "monte_carlo": {
+    "baseline": {
+      "p10": 44.99739967183966,
+      "p50": 57.333440079634926,
+      "p90": 75.100483705493,
+      "p99": 94.56590574293818,
+      "ruin_prob": 0.2368,
+      "trials": 5000
+    },
+    "survival": {
+      "p10": 86.05531115668963,
+      "p50": 90.98299573961266,
+      "p90": 96.84833272087204,
+      "p99": 102.74922307381759,
+      "ruin_prob": 0.0,
+      "trials": 5000
+    }
+  },
+  "config": {
+    "starting_balance": 100.0,
+    "symbols_used": [
+      "ACU/USD",
+      "PEAQ/USD",
+      "HFT/USD",
+      "SSV/USD",
+      "ANKR/USD",
+      "SOSO/USD",
+      "KNC/USD",
+      "SNX/USD",
+      "DOT/USD",
+      "NODE/USD",
+      "XAUT/USDT",
+      "2Z/USD",
+      "MORPHO/USD",
+      "KMNO/USD",
+      "STX/USD",
+      "RBC/USD",
+      "BONZO/USD",
+      "EUL/USD",
+      "BKS/USD",
+      "MSOL/USD",
+      "UXLINK/USD",
+      "LAVA/USD",
+      "ACA/USD",
+      "CHR/USD",
+      "BCH/USDT",
+      "OBOL/USDT",
+      "DENT/USD",
+      "VINE/USD",
+      "HIPPO/USD",
+      "VELODROME/USD"
+    ],
+    "seed": 42,
+    "generated_at": "2026-05-13T19:52:08.401471"
+  }
+}

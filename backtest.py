@@ -22,7 +22,7 @@ MAX_RISK_PCT      = 0.09         # 54% of Kelly — was 6%, +50% more per trade
 RISK_MULT         = 1.5
 MAX_POSITION_PCT  = 0.22
 MIN_TRADE_USD     = 5.0
-FIXED_STOP_PCT    = 0.15
+FIXED_STOP_PCT    = 0.10         # tighter stop: 10% (was 15%)
 EXIT1_PCT         = 0.20         # sell 50% at +20%
 # No fixed Exit 2 — progressive trailing only:
 TRAIL_BASE        = 0.10         # +20%-50%: 10% trail
@@ -33,12 +33,12 @@ TIME_STOP_HOURS   = 36
 API_SLEEP         = 1.4
 
 # Entry thresholds
-MIN_VOL_SURGE     = 2.0          # recent 6h must be 2× prior baseline
-MIN_1H_CHG        = 4.0          # 1h candle must be +4%+
-MAX_24H_CHG       = 300.0        # skip if already up 300%+
-MIN_LIQ_USD       = 50_000       # $50K quality gate — filters rug/scam/ghost pools
-MIN_VOL_ABS       = 15_000       # $15K hourly candle volume
-MIN_SCORE         = 60
+MIN_VOL_SURGE     = 3.0          # recent 6h must be 3× prior baseline (was 2.0)
+MIN_1H_CHG        = 6.0          # 1h candle must be +6%+ (was 4.0)
+MAX_24H_CHG       = 150.0        # skip if already up 150%+ (was 300%)
+MIN_LIQ_USD       = 50_000       # $50K quality gate
+MIN_VOL_ABS       = 20_000       # $20K hourly candle volume (was 15K)
+MIN_SCORE         = 75           # higher quality entry (was 60)
 PRICE_SANITY      = 20.0
 
 
@@ -150,6 +150,7 @@ def evaluate_entry(candles: List[list], idx: int, liq_usd: float) -> Optional[di
     score += 25 if swept else 0
     score += 15 if amd else 0
     score += min(vsurge / MIN_VOL_SURGE * 10, 15)
+    score += 10 if vsurge >= 4.0 else 0  # bonus for extreme volume spikes
 
     if score < MIN_SCORE:
         return None

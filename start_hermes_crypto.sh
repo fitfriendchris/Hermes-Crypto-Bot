@@ -1,0 +1,1 @@
+/Users/yuhfriendchris/Hermes-Crypto-Bot/start_hermes.sh

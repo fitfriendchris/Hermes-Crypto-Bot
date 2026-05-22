@@ -1,33 +1,5 @@
-  
-# UPDATED REQUIREMENTS
-# Core
-ccxt>=4.0.0
-pandas>=2.0.0
-numpy>=1.24.0
-websockets>=11.0
-python-dotenv>=1.0.0
-pyyaml>=6.0
-requests>=2.31.0
-aiohttp>=3.8.0
-
-# Blockchain
-web3>=6.0.0              # MetaMask/ETH integration
-solders>=0.21.0          # Solana keypair
-solana>=0.30.0           # Solana RPC client
-base58>=2.1.0          # Base58 encoding for Solana addresses
-
-# Optional blockchain (comment out if installation fails)
-# solders-py>=0.18.0       # Python Solana bindings
-
-# Alerts
-python-telegram-bot>=20.0  # Telegram notifications
-telethon>=1.28.0           # Alternative Telegram
-
-# Data
-jupyter>=1.0.0           # Notebook analysis
-matplotlib>=3.7.0        # Equity curve plotting
-seaborn>=0.12.0          # Visualization
-
-# Testing
-pytest>=7.0.0            # Unit tests
-pytest-asyncio>=0.21.0   # Async testing
+aiohttp
+requests
+base58
+solders
+solana

@@ -19,10 +19,13 @@ class DEXConnector:
     def __init__(self, config: Dict):
         self.config = config
         self.dexscreener_api = "https://api.dexscreener.com"
-        self.jupiter_api = "https://quote-api.jup.ag/v6"
+        self.jupiter_api = "https://api.jup.ag/swap/v1"
         self.pumpfun_api = "https://frontend-api.pump.fun"
         self.raydium_api = "https://api.raydium.io/v2"
         self.birdeye_api = "https://public-api.birdeye.so"
+        self.gecko_api = "https://api.geckoterminal.com/api/v2"
+        self.axiom_api = "https://api3.axiom.trade"
+        self.axiom_token = "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJhdXRoZW50aWNhdGVkVXNlcklkIjoiMmFjMmE1NWUtMDVjOS00MzllLTk3ZTgtODk2ZGYwNTkyNDEwIiwic2NvcGUiOiJ3ZWIiLCJpYXQiOjE3Nzg3MTkyMjQsImV4cCI6MTc3ODcyMDE4NH0.hYm176FUY2MV03zaxL88KVUIiabs1dOuvyP_1agBaSo"
         
         # Session for keep-alive connections
         self.session = None
@@ -41,27 +44,134 @@ class DEXConnector:
             await self.session.close()
     
     # ============================================================
-    # DEXSCREENER — Token Discovery
+    # AXIOM — Trending Tokens (requires auth token)
     # ============================================================
     
-    async def get_token_profiles(self, limit: int = 20) -> List[Dict]:
+    async def get_axiom_trending(self, period: str = "1h", limit: int = 50) -> List[Dict]:
         """
-        Get latest token profiles from DexScreener.
-        Returns: list of trending tokens with metadata.
+        Get trending tokens from Axiom Trade API.
+        Requires auth-access-token from browser cookies.
         """
-        url = f"{self.dexscreener_api}/token-profiles/latest/v1"
+        if not self.axiom_token:
+            return []
+        
+        url = f"{self.axiom_api}/new-trending-v2?chain=solana&timePeriod={period}"
+        headers = {
+            'Authorization': f'Bearer {self.axiom_token}',
+            'User-Agent': 'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36',
+            'Accept': 'application/json',
+            'Origin': 'https://axiom.trade',
+            'Referer': 'https://axiom.trade/',
+        }
         
         try:
-            async with self.session.get(url) as response:
+            async with self.session.get(url, headers=headers, timeout=15) as response:
                 if response.status == 200:
                     data = await response.json()
-                    return data[:limit] if isinstance(data, list) else []
+                    # Axiom returns array of tokens
+                    tokens = data if isinstance(data, list) else data.get('data', [])
+                    result = []
+                    for t in tokens[:limit]:
+                        if isinstance(t, dict):
+                            # Transform Axiom format to dex_connector format
+                            token = {
+                                'symbol': t.get('tokenTicker', t.get('tokenName', 'UNKNOWN')),
+                                'tokenAddress': t.get('tokenAddress', ''),
+                                'chainId': 'solana',
+                                'priceUsd': float(t.get('priceUsd', 0) or 0),
+                                'liquidity': {'usd': float(t.get('liquidityUsd', 0) or 0)},
+                                'volume': {
+                                    'h24': float(t.get('volume24h', 0) or 0),
+                                    'h6': float(t.get('volume6h', 0) or 0),
+                                    'h1': float(t.get('volume1h', 0) or 0),
+                                    'm5': float(t.get('volume5m', 0) or 0),
+                                },
+                                'priceChange': {
+                                    'h24': float(t.get('priceChange24h', 0) or 0),
+                                    'h6': float(t.get('priceChange6h', 0) or 0),
+                                    'h1': float(t.get('priceChange1h', 0) or 0),
+                                    'm5': float(t.get('priceChange5m', 0) or 0),
+                                },
+                                'marketCap': float(t.get('marketCapUsd', 0) or 0),
+                                'baseToken': {
+                                    'symbol': t.get('tokenTicker', 'UNKNOWN'),
+                                    'address': t.get('tokenAddress', ''),
+                                    'name': t.get('tokenName', ''),
+                                },
+                                'pairCreatedAt': 0,
+                                'info': {
+                                    'imageUrl': t.get('imageUrl', ''),
+                                    'websites': [{'url': t.get('website', '')}] if t.get('website') else [],
+                                    'socials': [{'type': 'twitter', 'url': t.get('twitter', '')}] if t.get('twitter') else [],
+                                },
+                                'source': 'axiom',
+                                'poolAddress': t.get('pairAddress', ''),
+                                'holderCount': int(t.get('holderCount', 0) or 0),
+                            }
+                            result.append(token)
+                    return result
                 else:
-                    logger.warning(f"DexScreener error: {response.status}")
+                    logger.warning(f"Axiom API error: {response.status}")
                     return []
         except Exception as e:
-            logger.error(f"DexScreener fetch failed: {e}")
+            logger.warning(f"Axiom fetch failed: {e}")
             return []
+    
+    async def get_gecko_pools(self, pages: int = 3) -> List[Dict]:
+        """
+        Get trending pools from GeckoTerminal with REAL price/volume/liquidity data.
+        Transforms to dex_connector format for downstream modules.
+        """
+        pools = []
+        for page in range(1, pages + 1):
+            url = f"{self.gecko_api}/networks/solana/trending_pools?page={page}"
+            try:
+                async with self.session.get(url, timeout=15) as response:
+                    if response.status == 200:
+                        data = await response.json()
+                        raw_pools = data.get('data', [])
+                        for p in raw_pools:
+                            attr = p.get('attributes', {})
+                            name = attr.get('name', '')
+                            parts = name.split(' / ')
+                            symbol = parts[0] if len(parts) > 0 else 'UNKNOWN'
+                            vol_data = attr.get('volume_usd', {})
+                            price_data = attr.get('price_change_percentage', {})
+                            # Extract real token mint address from relationships
+                            rel = p.get('relationships', {})
+                            base_token_id = rel.get('base_token', {}).get('data', {}).get('id', '')
+                            # Format: "solana_MINTADDRESS" — extract after underscore
+                            mint_address = base_token_id.split('_', 1)[1] if '_' in base_token_id else ''
+                            
+                            token = {
+                                'symbol': symbol,
+                                'tokenAddress': mint_address,  # REAL token mint address for Jupiter
+                                'poolAddress': attr.get('address', ''),  # Pool address for reference
+                                'chainId': 'solana',
+                                'priceUsd': float(attr.get('base_token_price_usd', 0) or 0),
+                                'liquidity': {'usd': float(attr.get('reserve_in_usd', 0) or 0)},
+                                'volume': {
+                                    'h24': float(vol_data.get('h24', 0) or 0),
+                                    'h6': float(vol_data.get('h6', 0) or 0),
+                                    'h1': float(vol_data.get('h1', 0) or 0),
+                                    'm5': float(vol_data.get('m5', 0) or 0),
+                                },
+                                'priceChange': {
+                                    'h24': float(price_data.get('h24', 0) or 0),
+                                    'h6': float(price_data.get('h6', 0) or 0),
+                                    'h1': float(price_data.get('h1', 0) or 0),
+                                    'm5': float(price_data.get('m5', 0) or 0),
+                                },
+                                'marketCap': float(attr.get('market_cap_usd', 0) or attr.get('fdv_usd', 0) or 0),
+                                'baseToken': {'symbol': symbol, 'address': mint_address, 'name': symbol},
+                                'pairCreatedAt': 0,
+                                'info': {'imageUrl': '', 'websites': [], 'socials': []},
+                                'source': 'geckoterminal',
+                            }
+                            pools.append(token)
+            except Exception as e:
+                logger.warning(f"GeckoTerminal page {page} failed: {e}")
+        return pools
     
     async def get_pair_data(self, chain: str, pair_address: str) -> Optional[Dict]:
         """
@@ -294,21 +404,39 @@ class DEXConnector:
     async def discover_tokens(self, source: str = "mixed", limit: int = 20) -> List[Dict]:
         """
         Discover tokens from multiple sources.
-        source: 'dexscreener', 'pumpfun', 'birdeye', 'mixed'
+        Tries Axiom first, falls back to GeckoTerminal.
         """
         all_tokens = []
         
-        if source in ['dexscreener', 'mixed']:
-            profiles = await self.get_token_profiles(limit)
-            all_tokens.extend(profiles)
+        # Try Axiom first (best data quality) — disabled by default, enable with source='axiom'
+        if source == 'axiom':
+            try:
+                axiom_tokens = await self.get_axiom_trending(period="1h", limit=50)
+                if axiom_tokens:
+                    all_tokens.extend(axiom_tokens)
+                    logger.info(f"Axiom: {len(axiom_tokens)} tokens")
+            except Exception as e:
+                logger.debug(f"Axiom failed: {e}")
         
-        if source in ['pumpfun', 'mixed']:
-            launches = await self.get_pumpfun_new_launches(limit)
-            all_tokens.extend(launches)
+        # Default: GeckoTerminal
+        if not all_tokens and source in ['gecko', 'mixed']:
+            try:
+                gecko_pools = await self.get_gecko_pools(pages=3)
+                if gecko_pools:
+                    all_tokens.extend(gecko_pools)
+                    logger.info(f"GeckoTerminal: {len(gecko_pools)} tokens")
+            except Exception as e:
+                logger.debug(f"GeckoTerminal failed: {e}")
         
-        if source in ['birdeye', 'mixed']:
-            birdeye_tokens = await self.get_birdeye_token_list(limit=limit)
-            all_tokens.extend(birdeye_tokens)
+        # Last resort: other sources
+        if not all_tokens:
+            if source in ['pumpfun', 'mixed']:
+                launches = await self.get_pumpfun_new_launches(limit)
+                all_tokens.extend(launches)
+            
+            if source in ['birdeye', 'mixed']:
+                birdeye_tokens = await self.get_birdeye_token_list(limit=limit)
+                all_tokens.extend(birdeye_tokens)
         
         # Deduplicate by address
         seen = set()

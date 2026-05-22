@@ -21,12 +21,12 @@ import aiohttp
 logger = logging.getLogger('CryptoBot')
 
 # ── MINIMUM ENTRY STANDARDS ──
-MIN_VOLUME_24H    = 50_000   # $50K — prevents dust tokens
-MIN_LIQUIDITY_USD = 20_000   # $20K — ensures exits are possible
-MIN_1H_CHANGE_PCT = 3.0      # 1h must be up ≥ 3%
-MIN_SCORE         = 65       # raised from 60
-MIN_VOLUME_SURGE  = 3.0      # h24 vol must be ≥ 3× the h6×4 baseline
-MAX_24H_CHANGE    = 500.0    # skip tokens already up 500%+ (missed the move)
+MIN_VOLUME_24H    = 20_000   # $20K — backtest optimal
+MIN_LIQUIDITY_USD = 20_000   # $20K — micro-cap alpha lives here
+MIN_1H_CHANGE_PCT = 2.0      # 1h must be up ≥ 2% — catch more momentum
+MIN_SCORE         = 65       # high quality but more trades
+MIN_VOLUME_SURGE  = 2.0      # h24 vol must be ≥ 2× baseline — relaxed
+MAX_24H_CHANGE    = 300.0    # skip tokens already up 300%+ — allow momentum continuation
 
 # ── ICT STRUCTURE STATE ──
 structure_state: Dict[str, Dict] = {}
@@ -86,24 +86,25 @@ async def update_trend_state():
 
 def get_volume_profile(token: Dict) -> Dict:
     """
-    Real volume surge check:
-    - h24 vs (h6 × 4) to detect intraday acceleration
-    - Absolute floor: must have $50K 24h volume
+    Volume check for LIVE data (GeckoTerminal).
+    h24/h6/h1 are absolute totals — ratio compares 1h vs implied hourly avg from h24.
     Returns ratio and whether it passes.
     """
     vol_h24 = float(token.get('volume', {}).get('h24', 0))
-    vol_h6  = float(token.get('volume', {}).get('h6',  0))
+    vol_h1  = float(token.get('volume', {}).get('h1',  0))
 
-    # Annualise h6 to estimate 24h baseline
-    baseline = vol_h6 * 4 if vol_h6 > 0 else vol_h24 * 0.4
-    ratio    = vol_h24 / baseline if baseline > 0 else 1.0
+    # For live aggregated data: absolute volume is what matters
+    # h1 vs hourly avg ratio is unreliable on trending pools
+    # Use absolute floor + bonus if h1 is elevated
+    hourly_avg = vol_h24 / 24 if vol_h24 > 0 else 0
+    ratio = vol_h1 / hourly_avg if hourly_avg > 0 else 1.0
 
     return {
         'h24':     vol_h24,
-        'h6':      vol_h6,
-        'baseline': baseline,
+        'h1':      vol_h1,
+        'hourly_avg': hourly_avg,
         'ratio':   ratio,
-        'passes':  vol_h24 >= MIN_VOLUME_24H and ratio >= MIN_VOLUME_SURGE,
+        'passes':  vol_h24 >= MIN_VOLUME_24H,
     }
 
 
@@ -283,6 +284,59 @@ def detect_fvg(token: Dict) -> Dict:
 
 
 # ── MAIN ENTRY POINT ──
+
+async def evaluate_momentum_fast(token: Dict) -> Optional[Dict]:
+    """
+    FAST MOMENTUM — for live 30s scanning.
+    Drops ICT/AMD gates (need multi-observation state).
+    Keeps: volume surge + 1h momentum + trend + liquidity + FVG confluence.
+    """
+    sym   = token.get('baseToken', {}).get('symbol') or token.get('symbol', '?')
+    ch1h  = float(token.get('priceChange', {}).get('h1',  0))
+    ch24h = float(token.get('priceChange', {}).get('h24', 0))
+    ch5m  = float(token.get('priceChange', {}).get('m5',  0))
+    liq   = float(token.get('liquidity', {}).get('usd', 0))
+
+    # Gate 1: Already pumped too hard
+    if ch24h > MAX_24H_CHANGE:
+        return None
+
+    # Gate 2: BTC trend regime
+    if not trend_state['is_bullish']:
+        return None
+
+    # Gate 3: Minimum 1h momentum
+    if ch1h < MIN_1H_CHANGE_PCT:
+        return None
+
+    # Gate 4: Minimum liquidity
+    if liq > 0 and liq < MIN_LIQUIDITY_USD:
+        return None
+
+    # Gate 5: Volume surge
+    vol = get_volume_profile(token)
+    if not vol['passes']:
+        return None
+
+    # Gate 6: FVG confluence (simplified — no multi-candle dependency)
+    fvg_bullish = ch5m < -1 and ch1h > 3  # quick pullback on uptrend
+
+    # Composite score (simplified)
+    total_score = 40  # base for passing gates
+    total_score += min(ch1h * 5, 30)       # up to 30 pts for 1h momentum
+    total_score += min(vol['h24'] / 50000 * 10, 20)  # up to 20 pts for volume
+    total_score += 10 if fvg_bullish else 0
+    total_score += min(abs(ch24h) * 0.1, 10)  # some pts for 24h activity
+
+    if total_score < MIN_SCORE:
+        return None
+
+    token['momentum_score'] = total_score
+    token['volume_profile'] = vol
+    token['fvg_signal'] = fvg_bullish
+    logger.info(f"📈 FAST MOMENTUM: {sym} | Score: {total_score:.0f} | 1h: {ch1h:+.1f}% | Vol: {vol['ratio']:.1f}x")
+    return token
+
 
 async def evaluate_momentum(token: Dict) -> Optional[Dict]:
     """

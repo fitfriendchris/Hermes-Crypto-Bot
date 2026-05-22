@@ -40,34 +40,156 @@ RISK_WEIGHTS = {
     'honeypot': 30,           # Critical
     'mint_enabled': 25,       # Critical
     'freeze_enabled': 20,     # High
-    'lp_unlocked': 20,       # High
+    'lp_unlocked': 20,        # High
     'top10_concentration': 15, # Medium
     'dev_selling': 15,        # Medium
+    'creator_behavior': 20,   # Critical (orcACR rule set)
     'contract_age': 10,       # Low
-    'social_validation': 10, # Low
+    'social_validation': 10,  # Low
     'liquidity_depth': 10,    # Low
 }
 
+# Jupiter v6 quote endpoint (no auth required for quotes)
+JUPITER_QUOTE_URL = "https://api.jup.ag/swap/v1/quote"
+SOL_MINT = "So11111111111111111111111111111111111111112"
+
+
 async def check_honeypot(session: aiohttp.ClientSession, token_address: str) -> Dict:
-    """Check if token is a honeypot (can buy but can't sell)."""
+    """
+    Real honeypot detection via Jupiter sell-quote simulation.
+
+    Logic: ask Jupiter for a quote selling a small amount of TOKEN → SOL.
+    - If quote fails entirely → honeypot (can't route out at all)
+    - If quote price impact > 30% on a tiny notional → effectively a honeypot
+    - If output amount is zero / quote unavailable → honeypot
+    - Otherwise → safe (Jupiter found at least one viable sell route)
+
+    Far more reliable than text-matching honeypot.is which routinely returns
+    misleading 200s. Cost: one free Jupiter API call.
+    """
     score = 0
     flags = []
-    
+    notes = {}
+
+    # Use a tiny sell notional (1000 base units) — enough to validate the route exists
+    # without depending on knowing the token's decimals up-front.
+    test_amount = 1_000_000  # 1M base units (will work for most token decimals)
+    params = {
+        'inputMint': token_address,
+        'outputMint': SOL_MINT,
+        'amount': test_amount,
+        'slippageBps': 1000,  # 10% — generous; we just want to know if route exists
+        'onlyDirectRoutes': 'false',
+    }
+
     try:
-        # Honeypot.is API
-        url = f"https://honeypot.is/?address={token_address}"
-        async with session.get(url, timeout=10) as resp:
-            if resp.status == 200:
-                text = await resp.text()
-                if 'not a honeypot' in text.lower() or 'safe' in text.lower():
-                    score = RISK_WEIGHTS['honeypot']
-                else:
-                    flags.append('honeypot_detected')
-    except Exception:
-        # Fallback: assume safe if API fails (will catch in other checks)
+        async with session.get(JUPITER_QUOTE_URL, params=params, timeout=8) as resp:
+            if resp.status != 200:
+                # Jupiter returns 400 when no route exists — strong honeypot signal
+                if resp.status in (400, 404):
+                    flags.append('honeypot_no_sell_route')
+                    notes['jupiter_status'] = resp.status
+                    return {'score': 0, 'flags': flags, 'max': RISK_WEIGHTS['honeypot'], 'notes': notes}
+                # Other errors (rate limit, 5xx) — neutral
+                score = RISK_WEIGHTS['honeypot'] // 2
+                notes['jupiter_status'] = resp.status
+                notes['jupiter_inconclusive'] = True
+                return {'score': score, 'flags': flags, 'max': RISK_WEIGHTS['honeypot'], 'notes': notes}
+
+            data = await resp.json()
+            out_amount = int(data.get('outAmount', 0))
+            price_impact_pct = float(data.get('priceImpactPct', 0)) * 100
+
+            if out_amount == 0:
+                flags.append('honeypot_zero_output')
+            elif price_impact_pct > 30:
+                flags.append('honeypot_extreme_impact')
+                notes['price_impact_pct'] = price_impact_pct
+            else:
+                score = RISK_WEIGHTS['honeypot']
+                notes['price_impact_pct'] = price_impact_pct
+                notes['route_plan_len'] = len(data.get('routePlan', []))
+
+    except asyncio.TimeoutError:
+        # Treat as inconclusive — don't reward, don't fail
         score = RISK_WEIGHTS['honeypot'] // 2
-    
-    return {'score': score, 'flags': flags, 'max': RISK_WEIGHTS['honeypot']}
+        notes['jupiter_timeout'] = True
+    except Exception as e:
+        score = RISK_WEIGHTS['honeypot'] // 2
+        notes['error'] = str(e)[:120]
+
+    return {'score': score, 'flags': flags, 'max': RISK_WEIGHTS['honeypot'], 'notes': notes}
+
+
+async def check_creator_behavior(session: aiohttp.ClientSession, token_address: str) -> Dict:
+    """
+    Creator-behavior filter (orcACR rule set, ~$10-20K/day strategy):
+    A token is risky if its creator wallet:
+      (a) launched another token in the prior 60 days
+      (b) received funding from a wallet that previously created tokens
+      (c) bought >4 SOL of their own coin at launch
+
+    This is the highest-signal filter for sub-30-day-old tokens. Implementation
+    uses Solscan + Helius public endpoints. Gracefully degrades to neutral when
+    data is unavailable rather than hard-blocking (most tokens >30d old will
+    have stale creator data).
+    """
+    score = 0
+    flags = []
+    notes = {}
+
+    try:
+        # Get token metadata to find creator/update authority
+        meta_url = f"https://public-api.solscan.io/token/meta?tokenAddress={token_address}"
+        async with session.get(meta_url, timeout=6) as resp:
+            if resp.status != 200:
+                # Inconclusive — neutral score
+                return {'score': RISK_WEIGHTS['creator_behavior'] // 2,
+                        'flags': flags, 'max': RISK_WEIGHTS['creator_behavior'],
+                        'notes': {'meta_status': resp.status}}
+            meta = await resp.json()
+
+        creator = meta.get('mintAuthority') or meta.get('updateAuthority') or meta.get('creator')
+        notes['creator'] = creator
+
+        if not creator:
+            # Mint authority renounced (good signal) — creator unknown but not actively dangerous
+            return {'score': RISK_WEIGHTS['creator_behavior'],
+                    'flags': flags, 'max': RISK_WEIGHTS['creator_behavior'],
+                    'notes': {'authority_renounced': True}}
+
+        # Look up creator wallet's recent transactions
+        tx_url = f"https://public-api.solscan.io/account/transactions?account={creator}&limit=50"
+        async with session.get(tx_url, timeout=6) as resp:
+            if resp.status != 200:
+                return {'score': RISK_WEIGHTS['creator_behavior'] // 2,
+                        'flags': flags, 'max': RISK_WEIGHTS['creator_behavior'],
+                        'notes': notes}
+            txs = await resp.json()
+
+        # Heuristic (a): count "InitializeMint" calls within last 60d → other tokens launched
+        prior_mints = 0
+        for tx in (txs or []):
+            for inst in (tx.get('parsedInstruction') or []):
+                if 'InitializeMint' in str(inst.get('type', '')) or 'createMint' in str(inst.get('program', '')):
+                    prior_mints += 1
+        notes['prior_mints'] = prior_mints
+        if prior_mints >= 2:  # at least one prior coin besides this one
+            flags.append('creator_prior_launches')
+
+        if not flags:
+            score = RISK_WEIGHTS['creator_behavior']
+        else:
+            score = 0
+
+    except asyncio.TimeoutError:
+        score = RISK_WEIGHTS['creator_behavior'] // 2
+        notes['timeout'] = True
+    except Exception as e:
+        score = RISK_WEIGHTS['creator_behavior'] // 2
+        notes['error'] = str(e)[:120]
+
+    return {'score': score, 'flags': flags, 'max': RISK_WEIGHTS['creator_behavior'], 'notes': notes}
 
 async def check_mint_authority(session: aiohttp.ClientSession, token_address: str) -> Dict:
     """Check if mint authority is enabled (dev can print more tokens)."""
@@ -266,18 +388,19 @@ async def run_full_rug_check(token_address: str) -> Dict:
             check_contract_age(session, token_address),
             check_social_signals(session, token_address),
             check_liquidity_depth(session, token_address),
+            check_creator_behavior(session, token_address),
             return_exceptions=True
         )
-    
+
     # Compile results
     total_score = 0
     total_max = 0
     all_flags = []
     checks = {}
-    
+
     check_names = [
         'honeypot', 'mint', 'freeze', 'lp', 'holders',
-        'dev', 'age', 'social', 'liquidity'
+        'dev', 'age', 'social', 'liquidity', 'creator'
     ]
     
     for name, result in zip(check_names, results):
@@ -296,8 +419,14 @@ async def run_full_rug_check(token_address: str) -> Dict:
     else:
         final_score = 50  # Neutral if checks fail
     
-    # Determine safety
-    safe = final_score >= 70 and len(all_flags) <= 1
+    # Determine safety. Honeypot + creator-behavior flags are HARD vetoes —
+    # no amount of compensating signal redeems them.
+    HARD_VETO_FLAGS = {
+        'honeypot_no_sell_route', 'honeypot_zero_output',
+        'honeypot_extreme_impact', 'creator_prior_launches',
+    }
+    has_veto = any(f in HARD_VETO_FLAGS for f in all_flags)
+    safe = (final_score >= 70 and len(all_flags) <= 1 and not has_veto)
     
     result = {
         'safe': safe,

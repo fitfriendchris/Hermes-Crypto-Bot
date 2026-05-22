@@ -17,8 +17,8 @@ import aiohttp
 
 logger = logging.getLogger('CryptoBot')
 
-JUPITER_QUOTE_URL = "https://quote-api.jup.ag/v6/quote"
-JUPITER_SWAP_URL  = "https://quote-api.jup.ag/v6/swap"
+JUPITER_QUOTE_URL = "https://api.jup.ag/swap/v1/quote"
+JUPITER_SWAP_URL  = "https://api.jup.ag/swap/v1/swap"
 
 SOL_MINT  = "So11111111111111111111111111111111111111112"
 USDC_MINT = "EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v"
@@ -208,24 +208,31 @@ class SwapManager:
         now = time.time()
         if self._sol_price > 0 and now - self._sol_price_ts < 60:
             return self._sol_price
-        try:
-            async with aiohttp.ClientSession() as s:
-                async with s.get(
-                    "https://api.dexscreener.com/latest/dex/tokens/"
-                    "So11111111111111111111111111111111111111112",
-                    timeout=aiohttp.ClientTimeout(total=10),
-                ) as resp:
-                    if resp.status == 200:
-                        data = await resp.json()
-                        pairs = data.get("pairs", [])
-                        if pairs:
-                            price = float(pairs[0].get("priceUsd", 0))
-                            if price > 0:
-                                self._sol_price    = price
+        
+        # Try multiple sources
+        sources = [
+            # CoinGecko first (most reliable)
+            ("CoinGecko", "https://api.coingecko.com/api/v3/simple/price?ids=solana&vs_currencies=usd",
+             lambda d: float(d.get('solana', {}).get('usd', 0))),
+            # Jupiter price API v2
+            ("Jupiter", "https://api.jup.ag/price/v2?ids=So11111111111111111111111111111111111111112", 
+             lambda d: float(d.get('data', {}).get('So11111111111111111111111111111111111111112', {}).get('price', 0))),
+        ]
+        
+        for name, url, extractor in sources:
+            try:
+                async with aiohttp.ClientSession() as s:
+                    async with s.get(url, timeout=aiohttp.ClientTimeout(total=10)) as resp:
+                        if resp.status == 200:
+                            data = await resp.json()
+                            price = extractor(data)
+                            if price and price > 10:  # Sanity: SOL should be >$10
+                                self._sol_price = price
                                 self._sol_price_ts = now
                                 return price
-        except Exception:
-            pass
+            except Exception:
+                continue
+        
         return self._sol_price or 150.0
 
     async def usd_to_lamports(self, usd: float) -> int:

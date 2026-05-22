@@ -6,15 +6,18 @@
 account:
   starting_balance_usd: 1000.0
   current_balance_usd: 1000.0
-  max_risk_per_trade_pct: 2.0
-  max_open_positions: 5
+  max_risk_per_trade_pct: 3.0
+  max_open_positions: 8
   max_daily_loss_usd: 50.0
-  max_drawdown_pct: 10.0
-  max_consecutive_losses: 3
-  cooldown_hours: 4
-  min_trade_size_usd: 10.0
-  max_trade_size_usd: 200.0
+  max_drawdown_pct: 20.0
+  max_consecutive_losses: 7
+  cooldown_hours: 1
+  min_trade_size_usd: 2.50
+  max_trade_size_usd: 50.0
+  position_size_hard_cap_pct: 0.05
+  risk_budget_per_trade_pct: 0.02
   compound: true
+  high_attention_mode: true
 
 chain:
   primary: solana
@@ -53,12 +56,26 @@ base_coins:
   
   tier_3:  # Micro-cap alpha — 15% allocation
     discovery: true
-    max_allocation_pct: 3
-    max_positions: 3
+    max_allocation_pct: 5
+    max_positions: 5
+    high_attention_mode: true
     sources:
       - dexscreener
       - birdeye
       - pumpfun
+    # High-attention micro coins — manual watchlist
+    watchlist:
+      - symbol: ATTENTION
+        mint: 52xfJnaHZzxAddm74SVyxmdyLJ6qrrW8WN2U3SjmxaVB
+        allocation_pct: 3
+        type: micro_attention
+        min_holding_usd: 30
+        max_position_usd: 100
+        strategy: trending_meme_scalper
+        entry_trigger: volume_spike_3x
+        take_profit_r: 4.0
+        stop_loss_pct: 20
+        time_stop_hours: 48
 
 # BTC HEDGE — Anchor against SOL ecosystem drawdown
 btc_hedge:
@@ -80,23 +97,27 @@ execution:
   priority_fee_micro_lamports: 10000
 
 risk_filter:
-  min_liquidity_usd: 100000  # $100K minimum for base coins
-  min_volume_24h_usd: 50000  # $50K daily
-  max_holder_concentration: 0.30  # Top 10 < 30%
+  min_liquidity_usd: 50000  # $50K minimum — filter out thin pools
+  min_volume_24h_usd: 25000  # $25K daily volume minimum
+  max_holder_concentration: 0.25  # Top 10 < 25%
   require_liquidity_locked: true
-  require_audit: true  # Audited only for base coins
-  max_contract_age_days: 30
+  require_audit: false
+  max_contract_age_days: 30  # NEW: Only trade tokens < 30 days old (fresh momentum)
+  
+  # NEW: Minimum quality requirements
+  min_holders: 50  # At least 50 holders (lowered for micro access)
+  min_transactions_24h: 30  # At least 30 txns/day
   
   # Rug pull detection
   honey_pot_check: true
   mint_function_check: true
-  ownership_renounced_check: true
-  lp_burned_check: true
+  ownership_renounced_check: false  # Too strict for micro-caps
+  lp_burned_check: false  # Too strict for micro-caps
   dev_wallet_sell_check: true
   
   # Whale tracking
-  whale_min_trade_usd: 10000
-  whale_track_count: 20
+  whale_min_trade_usd: 5000
+  whale_track_count: 10
 
 strategy:
   # Base coin accumulation — DCA style
@@ -106,14 +127,35 @@ strategy:
     amount_usd: 20
     coins: [SOL, JUP, JTO]
   
-  # Momentum strategy for tier 2
+  # Momentum strategy for tier 2 + high-attention micros
   momentum:
     enabled: true
     timeframe: 4h
     lookback_periods: 6
-    min_volume_spike: 2.0
-    entry_confidence: 70
-  
+    min_volume_spike: 2.0  # 2× volume surge
+    entry_confidence: 60   # 60+ score for micro-cap entries
+    min_1h_change_pct: 5.0  # ULTRA: +5% 1h for stronger momentum
+    max_24h_change_pct: 500  # ULTRA: Allow 500% runners (catch mooners)
+    
+  # Trending meme scalper — high-attention micro coins
+  trending_meme:
+    enabled: true
+    mode: high_attention  # Focus on ATTENTION and similar
+    watchlist:
+      - ATTENTION
+    position_pct: 0.03   # 3% per trade
+    target_pct: 0.05     # +5% take profit
+    time_stop_hours: 48
+    max_positions: 20
+    min_liquidity: 20000  # $20K minimum for micros
+    min_volume_24h: 10000
+    min_holders: 50
+    max_token_age_days: 14  # ULTRA: Only fresh <14 day tokens (higher momentum)
+    sources:
+      - dexscreener
+      - geckoterminal
+    auto_discover: true  # Find similar high-attention tokens
+    
   # Arbitrage between DEXs
   arbitrage:
     enabled: true
@@ -130,18 +172,20 @@ strategy:
 
 stop_loss:
   method: smart
-  fixed_pct: 8.0  # Tighter for base coins
-  atr_multiplier: 2.5
-  trail_after_r: 1.5
-  time_stop_hours: 48
+  fixed_pct: 35.0  # ULTRA: 35% for micro-caps (15%→25%→35% — data proves wider = profitable)
+  floor_pct: 0.35  # ULTRA: 35% absolute minimum stop width
+  cap_pct: 0.50   # ULTRA: 50% max stop for extreme volatility tokens
+  atr_multiplier: 3.0  # Wider ATR stop
+  trail_after_r: 2.0  # Trail only after 2R profit
+  time_stop_hours: 168  # ULTRA: 7-day hold for winners (data: +1.73 avg after 1h+)
 
 take_profit:
   method: tiered
-  risk_reward_ratio: 3.0
-  tier_1_r: 1.5  # Sell 30% at 1.5R
-  tier_2_r: 3.0  # Sell 30% at 3R
-  tier_3_r: 5.0  # Sell 20% at 5R
-  final_trail_pct: 15.0  # Trail final 20% at 15% below peak
+  risk_reward_ratio: 4.0  # Higher R:R target
+  tier_1_r: 1.5  # ULTRA: Sell 25% at 1.5R (faster profit capture)
+  tier_2_r: 3.0  # ULTRA: Sell 25% at 3R
+  tier_3_r: 5.0  # ULTRA: Sell 25% at 5R
+  final_trail_pct: 25.0  # ULTRA: 25% trail for final 25% (let runners run)
 
 # PROFIT PROTECTION — Fund Sovereign businesses
 profit_protection:

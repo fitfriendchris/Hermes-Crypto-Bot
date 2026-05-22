@@ -2,7 +2,7 @@
   "mode": "sol",
   "threshold_usd": 50.0,
   "sweep_pct": 0.5,
-  "accumulated_pnl": 0.0,
+  "accumulated_pnl": 0.27471268190420034,
   "total_swept_usd": 30.0,
   "total_swept_count": 1,
   "sweep_history": [
@@ -14,5 +14,5 @@
       "tx": "5yd9EvzFLuVGByBXqpfQF8YTgjGEqGxr6bvHrkTBQshEkPM1JGXSihrsYJLWqwoTvVoq6jEUZ1yyk3YnGXxLScah"
     }
   ],
-  "timestamp": "2026-05-12T22:13:09.666770"
+  "timestamp": "2026-05-14T00:25:55.991412"
 }

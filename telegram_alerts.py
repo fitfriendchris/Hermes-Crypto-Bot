@@ -67,22 +67,43 @@ class TelegramAlertManager:
     async def send_position_opened(self, position: Dict):
         sym    = position.get('token', '?')
         entry  = position.get('entry', 0)
-        size   = position.get('invested', 0)     # 'size' was a prior naming bug
+        size   = position.get('invested', 0)
         stop   = position.get('stop', 0)
         risk   = position.get('risk_pct', 0) * 100
         score  = position.get('score', 0)
         chain  = position.get('chain', 'solana')
         source = position.get('source', 'scanner')
+        mode   = position.get('mode_at_entry', '?')
         live   = os.getenv("LIVE_MODE", "false").lower() == "true"
         tag    = "🔴 LIVE" if (live and chain == 'solana') else "📄 PAPER"
 
+        # Account snapshot fields embedded into the entry message itself, so
+        # the user sees balance impact + portfolio totals without waiting for
+        # the follow-up portfolio snapshot.
+        cash       = position.get('_cash_after', None)
+        total      = position.get('_total_value', None)
+        daily      = position.get('_daily_pnl', None)
+        positions  = position.get('_open_count', None)
+
+        balance_block = ""
+        if cash is not None:
+            d_emoji = "🟢" if (daily or 0) >= 0 else "🔴"
+            balance_block = (
+                f"━━━━━━━━━━━━━━━━━━━━\n"
+                f"💰 Cash: <b>${cash:.2f}</b>   "
+                f"💎 Total: <b>${total:.2f}</b>\n"
+                f"{d_emoji} Day: <b>${daily:+.2f}</b>   "
+                f"📊 Open: <b>{positions}</b>"
+            )
+
         await self._send(
-            f"✅ <b>ENTRY [{tag}]</b>\n"
+            f"✅ <b>ENTRY [{tag}] · {mode}</b>\n"
             f"Token:  <code>{sym}</code>  ({chain})\n"
             f"Entry:  <b>${entry:.8f}</b>\n"
             f"Size:   <b>${size:.2f}</b>\n"
             f"Stop:   <b>${stop:.8f}</b>  (risk {risk:.1f}%)\n"
             f"Score:  <b>{score}</b> | via {source}"
+            + (f"\n{balance_block}" if balance_block else "")
         )
 
     async def send_position_closed(self, result: Dict):
@@ -91,14 +112,36 @@ class TelegramAlertManager:
         pnl_usd = result.get('pnl_usd', 0)
         reason  = result.get('reason', '?')
         portion = result.get('portion', 1.0)
+        mode    = result.get('mode_at_entry', '?')
         emoji   = "🟢" if pnl_usd > 0 else "🔴"
         ptag    = f" [{portion:.0%}]" if portion < 0.99 else ""
 
+        # Embed full account-state line: cash, total value (cash + unrealized),
+        # cumulative return vs starting capital, today's PnL.
+        cash       = result.get('_cash_after', None)
+        total      = result.get('_total_value', None)
+        total_ret  = result.get('_total_return_pct', None)
+        daily      = result.get('_daily_pnl', None)
+        positions  = result.get('_open_count', None)
+
+        balance_block = ""
+        if cash is not None:
+            d_emoji = "🟢" if (daily or 0) >= 0 else "🔴"
+            ret_str = f"  ({total_ret:+.1%})" if total_ret is not None else ""
+            balance_block = (
+                f"━━━━━━━━━━━━━━━━━━━━\n"
+                f"💰 Cash: <b>${cash:.2f}</b>   "
+                f"💎 Total: <b>${total:.2f}</b>{ret_str}\n"
+                f"{d_emoji} Day: <b>${daily:+.2f}</b>   "
+                f"📊 Open: <b>{positions}</b>"
+            )
+
         await self._send(
-            f"{emoji} <b>EXIT{ptag}</b>\n"
+            f"{emoji} <b>EXIT{ptag} · {mode}</b>\n"
             f"Token:  <code>{sym}</code>\n"
             f"PnL:    <b>${pnl_usd:+.2f}</b>  ({pnl_pct:+.1f}%)\n"
             f"Reason: <code>{reason}</code>"
+            + (f"\n{balance_block}" if balance_block else "")
         )
 
     async def send_trade_summary(self, snap: Dict):

@@ -324,6 +324,11 @@ class HighAttentionEngine:
         size = max(size, 2.50)  # Your $2.50 minimum
         size = min(size, 20.0)  # Max $20 on a Pump.fun gamble
         
+        # FINAL MINIMUM CHECK — must be able to swap back to SOL
+        if size < 2.50:
+            logger.warning(f"💰 {symbol} Pump.fun position ${size:.2f} below $2.50 minimum — SKIPPED")
+            return None
+        
         entry_price = token.get('price_usd', 0)
         if entry_price <= 0:
             return None
@@ -450,17 +455,20 @@ class HighAttentionEngine:
         size = max(size, 2.50)  # Your $2.50 minimum
         size = min(size, 50.0)  # Cap at $50
         
-        # Slippage estimate
+        # Slippage estimate — can reduce size below $2.50
         if liquidity > 0:
             slippage = (size / liquidity) * 100
             if slippage > 2.0:
                 size = liquidity * 0.02
                 logger.info(f"📐 {symbol} position capped at ${size:.2f} due to slippage")
         
-        # FINAL MINIMUM CHECK
+        # FINAL MINIMUM CHECK — after ALL sizing logic
         if size < 2.50:
             logger.warning(f"💰 {symbol} position ${size:.2f} below $2.50 minimum — SKIPPED")
             return None
+        
+        # Hard cap at $50
+        size = min(size, 50.0)
         
         entry_price = token.get('price_usd', 0)
         if entry_price <= 0:

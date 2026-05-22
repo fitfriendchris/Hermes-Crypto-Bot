@@ -332,6 +332,7 @@ class HighAttentionEngine:
         
         # TIGHTER stops for Pump.fun (they dump fast)
         stop_pct = 0.50  # 50% stop (vs 35% for established)
+        stop_price = entry_price * (1 - stop_pct)
         
         position = {
             'token': symbol,  # Bot compatibility
@@ -341,6 +342,11 @@ class HighAttentionEngine:
             'entry': entry_price,
             'invested': size,
             'quantity': quantity,
+            # CRITICAL: These are required by monitor/check_exit
+            'highest_price': entry_price,
+            'last_price': entry_price,
+            'stop': stop_price,
+            'stop_type': 'fixed',
             'source': 'pumpfun',
             'mode_at_entry': 'HIGH_ATTENTION',
             'momentum_score': token.get('reply_count', 0),  # Use replies as momentum
@@ -365,7 +371,8 @@ class HighAttentionEngine:
         logger.info(
             f"🚀 PUMP.FUN ENTRY: {symbol} | "
             f"Age: {age_min:.0f}m | Price: ${entry_price:.8f} | "
-            f"Size: ${size:.2f} | MC: ${mcap:.0f} | Replies: {replies}"
+            f"Size: ${size:.2f} | Stop: ${stop_price:.8f} | "
+            f"MC: ${mcap:.0f} | Replies: {replies}"
         )
         
         return position
@@ -460,6 +467,10 @@ class HighAttentionEngine:
         
         quantity = size / entry_price
         
+        # Calculate stop loss (using bot's calc_stop logic)
+        stop_pct = self.config['stop_loss_pct']  # 20% default
+        stop_price = entry_price * (1 - stop_pct)
+        
         position = {
             'token': symbol,  # Bot compatibility
             'symbol': symbol,
@@ -468,6 +479,11 @@ class HighAttentionEngine:
             'entry': entry_price,
             'invested': size,
             'quantity': quantity,
+            # CRITICAL: These are required by monitor/check_exit
+            'highest_price': entry_price,
+            'last_price': entry_price,
+            'stop': stop_price,
+            'stop_type': 'fixed',
             'source': 'high_attention',
             'mode_at_entry': 'HIGH_ATTENTION',
             'momentum_score': change_1h,
@@ -488,6 +504,7 @@ class HighAttentionEngine:
         logger.info(
             f"🔥 HIGH-ATTENTION ENTRY: {symbol} | "
             f"Price: ${entry_price:.6f} | Size: ${size:.2f} | "
+            f"Stop: ${stop_price:.6f} ({stop_pct*100:.0f}%) | "
             f"1h: {change_1h:+.1f}% | Vol: ${volume_1h:.0f} | "
             f"Liq: ${liquidity:.0f} | {'WHITELIST' if is_whitelist else 'DISCOVERED'}"
         )

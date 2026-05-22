@@ -297,34 +297,31 @@ class HighAttentionEngine:
         symbol = token.get('symbol', 'UNKNOWN')
         age_min = token.get('age_minutes', 999)
         
-        # STRICT: Must be <30 minutes old
-        if age_min > 30:
-            logger.debug(f"🕐 {symbol} too old: {age_min:.0f}m (max 30m)")
+        # STRICT: Must be <15 minutes old (not 30)
+        if age_min > 15:
+            logger.debug(f"🕐 {symbol} too old: {age_min:.0f}m (max 15m)")
             return None
         
         # Market cap filter (avoid already-pumped)
         mcap = token.get('market_cap', 0)
-        if mcap > 100_000:  # Skip if already >$100K mcap
+        if mcap > 50_000:  # TIGHTER: Skip if already >$50K mcap
             logger.debug(f"📈 {symbol} mcap too high: ${mcap:.0f}")
             return None
-        if mcap < 5_000:  # Skip if < $5K (likely dead)
+        if mcap < 5_000:
             logger.debug(f"📉 {symbol} mcap too low: ${mcap:.0f}")
             return None
         
         # Social engagement ( replies = hype )
         replies = token.get('reply_count', 0)
-        if replies < 5:  # At least 5 replies on Pump.fun
+        if replies < 10:  # TIGHTER: At least 10 replies
             logger.debug(f"💬 {symbol} not enough replies: {replies}")
             return None
         
-        # Position sizing for Pump.fun (SMALLER — higher risk)
-        # Max 5% of balance on Pump.fun (vs 15% on whitelist)
-        position_pct = min(self.config['position_pct'], 0.05)
-        size = balance * position_pct
-        size = max(size, 2.50)  # Your $2.50 minimum
-        size = min(size, 20.0)  # Max $20 on a Pump.fun gamble
+        # Position sizing for Pump.fun — ALWAYS $2.50 max
+        size = 2.50  # Fixed small size — Pump.fun is gambling
+        logger.info(f"📊 {symbol} PUMP.FUN position: $2.50 (gamble mode)")
         
-        # FINAL MINIMUM CHECK — must be able to swap back to SOL
+        # FINAL MINIMUM CHECK
         if size < 2.50:
             logger.warning(f"💰 {symbol} Pump.fun position ${size:.2f} below $2.50 minimum — SKIPPED")
             return None
@@ -335,8 +332,8 @@ class HighAttentionEngine:
         
         quantity = size / entry_price
         
-        # TIGHTER stops for Pump.fun (they dump fast)
-        stop_pct = 0.50  # 50% stop (vs 35% for established)
+        # TIGHTER stops for Pump.fun — 35% to match catastrophe floor
+        stop_pct = 0.35  # 35% stop (was 50%, now matches system-wide floor)
         stop_price = entry_price * (1 - stop_pct)
         
         position = {
@@ -368,7 +365,7 @@ class HighAttentionEngine:
             # Risk params — TIGHTER for early launches
             'stop_loss_pct': stop_pct,
             'take_profit_pct': 1.00,  # +100% take profit (moon or die)
-            'time_stop_hours': 2,     # 2 hour max hold (dump fast)
+            'time_stop_hours': 1,     # 1 hour max hold (dump fast)
             'tier_exits': {'1': False, '2': False, '3': False},
             'take_profit_r': 2.0,     # 2R target (100% gain)
             'risk_pct': stop_pct,
@@ -394,64 +391,82 @@ class HighAttentionEngine:
         # Check if whitelist symbol — relaxed criteria
         is_whitelist = sym_upper in SYMBOL_WHITELIST
         
-        # Hard filters (relaxed for whitelist AND early discoveries)
-        is_early = token.get('age_minutes', 999) < 60 or token.get('source') == 'dexscreener_new'
+        # ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+        # HARD FILTERS — NO EXCEPTIONS
+        # ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+        
+        # 1. LIQUIDITY — must have $10K+ (prevents rug pulls)
         liquidity = token.get('liquidity_usd', 0)
-        min_liq = 5000 if (is_whitelist or is_early) else self.config['min_liquidity']
-        if liquidity < min_liq:
-            logger.debug(f"💧 {symbol} liquidity too low: ${liquidity:.0f} < ${min_liq}")
+        if liquidity < 10_000:
+            logger.debug(f"💧 {symbol} liquidity too low: ${liquidity:.0f} < $10K")
             return None
         
+        # 2. VOLUME — must have $5K+ 24h (proves activity)
         volume_24h = token.get('volume_24h', 0)
-        min_vol = 5000 if (is_whitelist or is_early) else self.config['min_volume_24h']
-        if volume_24h < min_vol:
-            logger.debug(f"📉 {symbol} 24h volume too low: ${volume_24h:.0f} < ${min_vol}")
+        if volume_24h < 5_000:
+            logger.debug(f"📉 {symbol} 24h volume too low: ${volume_24h:.0f} < $5K")
             return None
         
-        holders = token.get('holder_count', 0)
-        min_holders = 0 if (is_whitelist or is_early) else self.config['min_holders']
-        if holders < min_holders and not (is_whitelist or is_early):
-            logger.debug(f"👥 {symbol} holder count too low: {holders} < {min_holders}")
-            return None
-        
-        # Volume spike detection — relaxed for whitelist AND early discoveries
+        # 3. VOLUME SPIKE — must be spiking NOW (catches early moves)
         volume_1h = token.get('volume_1h', 0)
         has_spike = self.detect_volume_spike(symbol, volume_1h)
-        if not has_spike and not (is_whitelist or is_early):
-            logger.debug(f"📊 {symbol} no volume spike detected")
+        if not has_spike:
+            logger.debug(f"📊 {symbol} NO VOLUME SPIKE — SKIPPED")
             return None
-        elif not has_spike and (is_whitelist or is_early):
-            logger.info(f"📊 {symbol} {'WHITELIST' if is_whitelist else 'EARLY'} — bypassing volume spike check")
-        else:
-            logger.info(f"📊 {symbol} volume spike confirmed")
+        logger.info(f"📊 {symbol} volume spike confirmed: ${volume_1h:.0f}")
         
-        # Price action check — relaxed for whitelist
+        # 4. PRICE ACTION — must be green 1h (momentum)
         change_1h = token.get('change_1h', 0)
-        min_change = -5.0 if is_whitelist else 1.0  # Whitelist can be down -5%, others need +1%
-        if change_1h < min_change:
-            logger.debug(f"📉 {symbol} 1h change too low: {change_1h:.2f}% < {min_change}%")
+        if change_1h < 2.0:  # At least +2% in last hour
+            logger.debug(f"📉 {symbol} 1h change too low: {change_1h:.1f}% < +2%")
             return None
         
-        # Skip if already up too much (relaxed for early discoveries)
+        # 5. MAX 1H — don't chase if already up 50%+ in 1h (peaked)
+        if change_1h > 50.0 and not is_whitelist:
+            logger.debug(f"🚀 {symbol} already up {change_1h:.0f}% in 1h — peaked")
+            return None
+        
+        # 6. MAX 24H — don't chase if already up 200%+ (pump is done)
         change_24h = token.get('change_24h', 0)
-        max_24h = 2000 if is_early else (500 if is_whitelist else 300)
+        max_24h = 100 if is_whitelist else 50  # TIGHT: 50% for unknown, 100% for whitelist
         if change_24h > max_24h:
-            logger.debug(f"🚀 {symbol} already up {change_24h:.0f}% — chasing (max {max_24h}%)")
-            return None
-        elif change_24h < -50 and not is_whitelist:
-            # Skip if dumping hard (unless whitelist)
-            logger.debug(f"📉 {symbol} dumping: {change_24h:.1f}%")
+            logger.debug(f"🚀 {symbol} already up {change_24h:.0f}% in 24h — chasing (max {max_24h}%)")
             return None
         
-        # Position sizing — WHITELIST gets Kelly sizing
+        # 7. NO DUMPERS — skip if down more than 10% recently
+        if change_24h < -10:
+            logger.debug(f"📉 {symbol} dumping: {change_24h:.1f}% < -10%")
+            return None
+        
+        # 8. AGE — skip tokens >30 minutes old (pump already happened)
+        age_min = token.get('age_minutes', 999)
+        if age_min > 30 and not is_whitelist:
+            logger.debug(f"🕐 {symbol} too old: {age_min:.0f}m > 30m (pump done)")
+            return None
+        
+        # 9. MOMENTUM SCORE — must have strong recent activity
+        momentum = token.get('momentum_score', change_1h)
+        if momentum < 5.0 and not is_whitelist:
+            logger.debug(f"📊 {symbol} momentum too weak: {momentum:.1f} < 5")
+            return None
+        
+        # ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+        # POSITION SIZING — SMALL ON UNKNOWN, BIGGER ON PROVEN
+        # ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+        
         if is_whitelist:
             from symbol_filter import get_position_size_pct
             position_pct = get_position_size_pct(sym_upper, self.config['position_pct'])
             logger.info(f"📊 {symbol} WHITELIST position: {position_pct*100:.1f}% of balance")
+            size = balance * position_pct
+            size = min(size, 15.0)  # Whitelist max $15
         else:
-            position_pct = self.config['position_pct']
+            # UNKNOWN tokens: MAX $2.50 (minimum viable)
+            size = 2.50
+            logger.info(f"📊 {symbol} DISCOVERY position: $2.50 (unknown token)")
         
-        size = balance * position_pct
+        size = max(size, 2.50)  # Floor
+        size = min(size, 50.0)   # Hard ceiling
         
         # ACCOUNT FOR SWAP FEES: reduce gross size so net position ≥ $2.50
         from fee_calculator import apply_entry_cost, estimate_swap_cost

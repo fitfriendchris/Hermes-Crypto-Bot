@@ -1,19 +1,31 @@
 {
   "balance": 90.78,
-  "day_start_balance": 90.78,
-  "week_start_balance": 90.78,
-  "month_start_balance": 64.03,
   "positions": {},
-  "history": [],
-  "daily_pnl": 0.0,
-  "weekly_pnl": 0.0,
-  "monthly_pnl": 0.0,
-  "total_return_pct": 0.0,
+  "history": [
+    {
+      "token": "CAP",
+      "entry": 0.03339832647665691,
+      "exit": 1e-07,
+      "invested": 5.0,
+      "proceeds": 0.005,
+      "pnl": -4.995,
+      "pnl_pct": -0.999,
+      "reason": "rug_pull",
+      "hold_time_hours": 0.05,
+      "highest_price": 0.03339832647665691,
+      "portion": 1.0,
+      "timestamp": "2026-05-23T04:10:02.594012+00:00"
+    }
+  ],
+  "daily_pnl": -4.995,
+  "weekly_pnl": -4.995,
+  "trades_today": 1,
+  "consecutive_losses": 1,
   "max_drawdown": 0.0,
-  "consecutive_losses": 0,
-  "trades_today": 0,
+  "total_protected": 0,
   "halt_entries_until": null,
   "halt_reason": "",
-  "last_reset": "2026-05-23T00:59:49.766267+00:00",
-  "version": "2.1-fresh"
+  "day_start_balance": 90.78,
+  "week_start_balance": 90.78,
+  "timestamp": "2026-05-23T04:10:02.594412+00:00"
 }

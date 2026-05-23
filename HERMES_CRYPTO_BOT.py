@@ -515,12 +515,13 @@ def atr_stop_from_candles(entry: float, candles: list, multiplier: float = 2.5) 
 
 def _passes_quality_gate(token: Dict) -> bool:
     """
-    STRICT quality gate — filter out garbage meme coins.
+    Quality gate for micro-cap meme coins.
+    ULTRA v2: Lowered thresholds to actually catch moving tokens.
     Requires:
-      - Liquidity ≥ $100K (real money at risk)
-      - 24h Volume ≥ $50K (actual trading activity)
+      - Liquidity ≥ $10K (micro-cap minimum)
+      - 24h Volume ≥ $5K (proves activity)
       - Price change data available (not dead token)
-      - At least ONE social signal (website OR twitter OR telegram)
+      - Social signal OR whitelist status (relaxed for fresh pumps)
     """
     info = token.get('info', {}) or {}
     socials = info.get('socials', []) or []
@@ -530,29 +531,34 @@ def _passes_quality_gate(token: Dict) -> bool:
     price = float(token.get('priceUsd', 0))
     ch1h = float(token.get('priceChange', {}).get('h1', 0))
 
-    # STRICT requirements
-    has_liquidity = liq >= 100_000
-    has_volume = vol_24h >= 50_000
+    # ULTRA: Micro-cap thresholds
+    has_liquidity = liq >= 10_000
+    has_volume = vol_24h >= 5_000
     has_price = price > 0
-    has_momentum = abs(ch1h) > 0  # Must have recent price movement
-    has_social = bool(websites or socials)
+    has_momentum = abs(ch1h) > 0
 
     sym = token.get('baseToken', {}).get('symbol') or token.get('symbol', '?')
+    sym_upper = sym.upper()
     
+    # Whitelist symbols bypass social requirement
+    from symbol_filter import SYMBOL_WHITELIST
+    is_whitelist = sym_upper in SYMBOL_WHITELIST
+    has_social = bool(websites or socials) or is_whitelist
+
     if not has_liquidity:
-        logger.debug(f"🚫 {sym} — liquidity ${liq:,.0f} < $100K")
+        logger.info(f"🚫 {sym} — liquidity ${liq:,.0f} < $10K")
         return False
     if not has_volume:
-        logger.debug(f"🚫 {sym} — volume ${vol_24h:,.0f} < $50K")
+        logger.info(f"🚫 {sym} — volume ${vol_24h:,.0f} < $5K")
         return False
     if not has_price:
-        logger.debug(f"🚫 {sym} — no price data")
+        logger.info(f"🚫 {sym} — no price data")
         return False
     if not has_momentum:
-        logger.debug(f"🚫 {sym} — no recent price movement")
+        logger.info(f"🚫 {sym} — no recent price movement")
         return False
     if not has_social:
-        logger.debug(f"🚫 {sym} — no social presence")
+        logger.info(f"🚫 {sym} — no social presence")
         return False
     
     return True
@@ -939,6 +945,7 @@ async def paper_buy(position: Dict):
     state.balance -= invested
     state.positions[sym] = position
     state.trades_today += 1
+    state.save()   # IMMEDIATE PERSIST
 
     logger.info(f"PAPER BUY  {sym}: ${invested:.2f} @ ${position['entry']:.6f} | qty={position['quantity']:.4f}")
 
@@ -1212,6 +1219,7 @@ async def live_buy(position: Dict):
         state.balance -= actual_usd
         state.positions[sym] = position
         state.trades_today   += 1
+        state.save()   # IMMEDIATE PERSIST: prevent race on restart
         logger.info(
             f"LIVE BUY {sym}: ${actual_usd:.2f} @ {position['entry']:.6f} "
             f"| qty={result.output_amount:.4f} | Tx: {result.tx_signature[:20]}..."
@@ -1439,6 +1447,15 @@ async def high_attention_loop():
                 
                 pos = await evaluate_high_attention(token, state.balance)
                 if pos:
+                    # ── ANTI-RUG CHECK (critical safety gate) ──
+                    addr = pos.get('address', '')
+                    if addr and ANTIRUG_OK:
+                        from anti_rug_suite import run_full_rug_check
+                        rug_result = await run_full_rug_check(addr)
+                        if not rug_result['safe']:
+                            logger.warning(f"🚫 {sym} blocked by anti-rug: {rug_result['flags']}")
+                            continue
+                    
                     pos['source'] = 'high_attention'
                     pos['mode_at_entry'] = MODE_HIGH_ATTENTION
                     _block_reentry(sym)
@@ -1480,6 +1497,15 @@ async def high_attention_loop():
                     
                     pos = await evaluate_high_attention(token, state.balance)
                     if pos:
+                        # ── ANTI-RUG CHECK (critical safety gate) ──
+                        addr = pos.get('address', '')
+                        if addr and ANTIRUG_OK:
+                            from anti_rug_suite import run_full_rug_check
+                            rug_result = await run_full_rug_check(addr)
+                            if not rug_result['safe']:
+                                logger.warning(f"🚫 {sym} blocked by anti-rug: {rug_result['flags']}")
+                                continue
+                        
                         pos['source'] = 'high_attention_discovered'
                         pos['mode_at_entry'] = MODE_HIGH_ATTENTION
                         _block_reentry(sym)

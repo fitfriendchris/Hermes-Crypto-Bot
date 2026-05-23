@@ -209,20 +209,23 @@ class SwapManager:
         if self._sol_price > 0 and now - self._sol_price_ts < 60:
             return self._sol_price
         
-        # Try multiple sources
+        # Try multiple sources — prioritized by reliability
         sources = [
-            # CoinGecko first (most reliable)
+            # Kraken API (no rate limit, works from US)
+            ("Kraken", "https://api.kraken.com/0/public/Ticker?pair=SOLUSD",
+             lambda d: float(d.get('result', {}).get('SOLUSD', {}).get('c', [0])[0])),
+            # CoinGecko
             ("CoinGecko", "https://api.coingecko.com/api/v3/simple/price?ids=solana&vs_currencies=usd",
              lambda d: float(d.get('solana', {}).get('usd', 0))),
-            # Jupiter price API v2
-            ("Jupiter", "https://api.jup.ag/price/v2?ids=So11111111111111111111111111111111111111112", 
+            # Jupiter price API
+            ("Jupiter", "https://api.jup.ag/price/v2?ids=So11111111111111111111111111111111111111112",
              lambda d: float(d.get('data', {}).get('So11111111111111111111111111111111111111112', {}).get('price', 0))),
         ]
         
         for name, url, extractor in sources:
             try:
                 async with aiohttp.ClientSession() as s:
-                    async with s.get(url, timeout=aiohttp.ClientTimeout(total=10)) as resp:
+                    async with s.get(url, timeout=aiohttp.ClientTimeout(total=10), headers={'Accept': 'application/json'}) as resp:
                         if resp.status == 200:
                             data = await resp.json()
                             price = extractor(data)
@@ -230,10 +233,16 @@ class SwapManager:
                                 self._sol_price = price
                                 self._sol_price_ts = now
                                 return price
-            except Exception:
+                        elif resp.status == 429:
+                            logger.warning(f"{name} rate limited — trying next source")
+            except Exception as e:
+                logger.debug(f"Price source {name} failed: {e}")
                 continue
         
-        return self._sol_price or 150.0
+        # Last resort: use cached or a conservative fallback
+        fallback = self._sol_price or 84.0  # Updated fallback to current market
+        logger.warning(f"All price sources failed — using cached/fallback ${fallback:.2f}")
+        return fallback
 
     async def usd_to_lamports(self, usd: float) -> int:
         sol_price = await self.get_sol_price()

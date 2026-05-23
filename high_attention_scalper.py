@@ -147,9 +147,11 @@ class DexScreenerAPI:
                     data = await resp.json()
                     tokens = []
                     for t in data:
+                        if not t or not isinstance(t, dict):
+                            continue
                         if t.get('chainId') == 'solana':
                             token = {
-                                'symbol': t.get('symbol', 'UNKNOWN'),
+                                'symbol': t.get('symbol') or 'UNKNOWN',
                                 'mint': t.get('tokenAddress', ''),
                                 'url': t.get('url', ''),
                                 'source': 'dexscreener',
@@ -470,9 +472,9 @@ class HighAttentionEngine:
             logger.debug(f"📊 {symbol} momentum too weak: {momentum:.1f} < 5")
             return None
         
-        # 10. HOLDERS — basic check
-        holders = token.get('holder_count', 0)
-        if holders < 10 and not is_whitelist:
+        # 10. HOLDERS — basic check (skip if data unavailable — DexScreener doesn't provide this)
+        holders = token.get('holder_count', -1)
+        if holders >= 0 and holders < 10 and not is_whitelist:
             logger.debug(f"👥 {symbol} too few holders: {holders} < 10")
             return None
         
@@ -699,7 +701,7 @@ class HighAttentionEngine:
                                                 'volume_1h': float(best.get('volume', {}).get('h1', 0) or 0),
                                                 'change_1h': ch_1h,
                                                 'change_24h': float(best.get('priceChange', {}).get('h24', 0) or 0),
-                                                'holder_count': int(best.get('holders', 0) or 0),
+                                                'holder_count': -1,  # DexScreener doesn't provide holder data
                                                 'age_minutes': age_min,
                                                 'source': 'dexscreener_new',
                                                 'is_pumpfun': False,  # Treat as early micro-cap

@@ -14,5 +14,7 @@
       "tx": "5yd9EvzFLuVGByBXqpfQF8YTgjGEqGxr6bvHrkTBQshEkPM1JGXSihrsYJLWqwoTvVoq6jEUZ1yyk3YnGXxLScah"
     }
   ],
-  "timestamp": "2026-05-22T17:50:55.602340"
+  "timestamp": "2026-05-22T17:50:55.602340",
+  "pending_swaps": {},
+  "completed_swaps": []
 }

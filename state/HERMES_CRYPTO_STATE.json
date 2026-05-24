@@ -17,9 +17,9 @@
       "timestamp": "2026-05-23T04:10:02.594012+00:00"
     }
   ],
-  "daily_pnl": -4.995,
+  "daily_pnl": 0.0,
   "weekly_pnl": -4.995,
-  "trades_today": 1,
+  "trades_today": 0,
   "consecutive_losses": 1,
   "max_drawdown": 0.09219999999999999,
   "total_protected": 0,
@@ -27,5 +27,5 @@
   "halt_reason": "",
   "day_start_balance": 90.78,
   "week_start_balance": 90.78,
-  "timestamp": "2026-05-23T18:00:18.122075"
+  "timestamp": "2026-05-24T00:00:21.740496"
 }

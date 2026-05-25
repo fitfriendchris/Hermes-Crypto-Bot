@@ -111,20 +111,24 @@ class HermesBot:
         self.tax = TaxExporter()
         logger.info("Tax exporter ready")
 
-        # Swap engine (only if wallet configured)
-        if self.cfg.wallet.private_key_base58 and "your" not in self.cfg.wallet.private_key_base58.lower():
-            from solders.keypair import Keypair
-            wallet = Keypair.from_base58_string(self.cfg.wallet.private_key_base58)
-            self.swap = SwapEngine(
-                rpc_manager=self.rpc,
-                wallet_keypair=wallet,
-                default_slippage_bps=self.cfg.position.default_slippage_bps,
-                max_slippage_bps=self.cfg.position.max_slippage_bps,
-            )
-            logger.info("Swap engine ready (wallet=%s...)", wallet.pubkey())
+        # Swap engine (only if wallet configured and valid)
+        self.swap = None
+        if self.cfg.mode == "live" and self.cfg.wallet.private_key_base58:
+            try:
+                from solders.keypair import Keypair
+                wallet = Keypair.from_base58_string(self.cfg.wallet.private_key_base58)
+                self.swap = SwapEngine(
+                    rpc_manager=self.rpc,
+                    wallet_keypair=wallet,
+                    default_slippage_bps=self.cfg.position.default_slippage_bps,
+                    max_slippage_bps=self.cfg.position.max_slippage_bps,
+                )
+                logger.info("Swap engine ready (wallet=%s...)", wallet.pubkey())
+            except Exception as exc:
+                logger.error("Failed to load wallet: %s — swap engine disabled", exc)
+                self.swap = None
         else:
-            logger.warning("Swap engine: NO WALLET CONFIGURED (paper mode only)")
-            self.swap = None
+            logger.info("Swap engine: disabled (paper mode or no wallet)")
 
         # Copy engine
         if self.swap:

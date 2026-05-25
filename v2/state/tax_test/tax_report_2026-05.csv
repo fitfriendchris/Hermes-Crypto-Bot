@@ -1,2 +1,0 @@
-timestamp,tx_hash,event_type,input_token,input_token_symbol,input_amount,input_usd_value,output_token,output_token_symbol,output_amount,output_usd_value,fee_usd,gain_loss_usd,cost_basis_usd,wallet_address,strategy,source_wallet,notes
-2026-05-25T03:50:40.882990+00:00,abc123,swap,So11111111111111111111111111111111111111112,SOL,1.0,84.5,EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v,USDC,84.0,84.0,0.05,84.0,0.0,test_wallet,copy_trade,source_wallet_1,

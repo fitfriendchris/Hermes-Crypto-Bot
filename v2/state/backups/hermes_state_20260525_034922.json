@@ -1,0 +1,56 @@
+{
+  "schema_version": 2,
+  "balance_usd": -25.0,
+  "peak_balance_usd": 0.0,
+  "positions": {
+    "TEST123": {
+      "token_mint": "TEST123",
+      "token_symbol": "TEST",
+      "entry_price_usd": 1.0,
+      "quantity": 10.0,
+      "invested_usd": 25.0,
+      "highest_price_usd": 1.0,
+      "opened_at": "2026-05-25T03:49:22.734199+00:00",
+      "strategy": "",
+      "source_wallet": ""
+    }
+  },
+  "history": [
+    {
+      "token_mint": "TEST123",
+      "token_symbol": "TEST",
+      "side": "buy",
+      "price_usd": 1.0,
+      "quantity": 10.0,
+      "usd_value": 25.0,
+      "tx_hash": "abc123",
+      "fee_usd": 0.0,
+      "pnl_usd": 0.0,
+      "pnl_pct": 0.0,
+      "reason": "",
+      "timestamp": "2026-05-25T03:49:22.734304+00:00",
+      "strategy": "",
+      "source_wallet": ""
+    }
+  ],
+  "daily_pnl": 0.0,
+  "weekly_pnl": 0.0,
+  "trades_today": 1,
+  "consecutive_losses": 0,
+  "max_drawdown_pct": 0.0,
+  "total_protected": 0.0,
+  "halt_entries_until": null,
+  "halt_reason": "",
+  "day_start_balance": 0.0,
+  "week_start_balance": 0.0,
+  "daily_loss_usd": 0.0,
+  "weekly_loss_usd": 0.0,
+  "rug_count_7d": 0,
+  "rpc_failure_count": 0,
+  "rpc_total_calls": 0,
+  "mode": "paper",
+  "timestamp": "2026-05-25T03:49:22.734334+00:00",
+  "copied_wallets": {},
+  "wallet_pnl": {},
+  "wallet_consecutive_losses": {}
+}

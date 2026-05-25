@@ -240,14 +240,18 @@ class RPCManager:
         return resp.value
 
     async def get_token_largest_accounts(self, mint: str) -> list:
+        from solders.pubkey import Pubkey
+        pk = Pubkey.from_string(mint) if isinstance(mint, str) else mint
         resp = await self.call_with_retry(
-            lambda c: c.get_token_largest_accounts(mint), f"token_largest_accounts({mint[:8]}...)"
+            lambda c: c.get_token_largest_accounts(pk), f"token_largest_accounts({mint[:8]}...)"
         )
         return resp.value or []
 
     async def get_parsed_account_info(self, pubkey: str) -> Any:
+        from solders.pubkey import Pubkey
+        pk = Pubkey.from_string(pubkey) if isinstance(pubkey, str) else pubkey
         resp = await self.call_with_retry(
-            lambda c: c.get_account_info_json_parsed(pubkey),
+            lambda c: c.get_account_info_json_parsed(pk),
             f"parsed_account_info({pubkey[:8]}...)",
         )
         return resp.value
@@ -255,8 +259,10 @@ class RPCManager:
     async def get_signatures_for_address(
         self, address: str, limit: int = 10
     ) -> list:
+        from solders.pubkey import Pubkey
+        pk = Pubkey.from_string(address) if isinstance(address, str) else address
         resp = await self.call_with_retry(
-            lambda c: c.get_signatures_for_address(address, limit=limit),
+            lambda c: c.get_signatures_for_address(pk, limit=limit),
             f"signatures_for_address({address[:8]}...)",
         )
         return resp.value or []

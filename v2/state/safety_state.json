@@ -1,0 +1,16 @@
+{
+  "daily_loss_usd": 11.0,
+  "weekly_loss_usd": 11.0,
+  "consecutive_losses": 0,
+  "peak_balance_usd": 90.78,
+  "current_balance_usd": 90.78,
+  "rug_count_7d": 0,
+  "rpc_failure_count": 0,
+  "rpc_total_calls": 0,
+  "halt_entries_until": null,
+  "halt_reason": "",
+  "last_trade_time": "2026-05-25T03:50:47.276250+00:00",
+  "paper_mode_completed_at": "2026-05-25T03:50:47.270976+00:00",
+  "created_at": "2026-05-25T03:49:27.706804+00:00",
+  "updated_at": "2026-05-25T03:50:47.276266+00:00"
+}

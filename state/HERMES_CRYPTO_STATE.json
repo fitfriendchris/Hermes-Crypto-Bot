@@ -1,5 +1,5 @@
 {
-  "balance": 76.69,
+  "balance": 76.6,
   "positions": {},
   "history": [
     {
@@ -64,7 +64,7 @@
   "total_protected": 0,
   "halt_entries_until": null,
   "halt_reason": "",
-  "day_start_balance": 76.69,
-  "week_start_balance": 76.69,
-  "timestamp": "2026-05-28T02:13:09.356105"
+  "day_start_balance": 76.6,
+  "week_start_balance": 76.6,
+  "timestamp": "2026-05-28T06:00:53.903801"
 }

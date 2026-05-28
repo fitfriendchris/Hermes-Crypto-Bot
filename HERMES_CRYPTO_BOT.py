@@ -2257,22 +2257,26 @@ async def main():
     await init_wallet()
 
     # After wallet init, run wallet discovery if no tracked wallets
-    if WALLET_SCORER_OK and copy_engine and not copy_engine.tracked_wallets:
-        logger.info("🔍 No tracked wallets — loading from leaderboard...")
-        try:
-            mirrors = get_mirrors(min_pnl=50.0, min_win_rate=0.50)
-            if mirrors:
-                await copy_engine.set_tracked_wallets(mirrors)
-                logger.info(f"🐋 Now mirroring {len(mirrors)} wallets from leaderboard")
-                for m in mirrors:
-                    logger.info(
-                        f"   → {m['name']} | {m['wallet'][:20]}... | "
-                        f"Score: {m['tier']} | PnL: +{m['pnl_30d_sol']:.1f} SOL | WinRate: {m['win_rate']:.0%}"
-                    )
-            else:
-                logger.warning("Leaderboard has no MIRROR-grade wallets")
-        except Exception as e:
-            logger.warning(f"Leaderboard load failed: {e}")
+    if WALLET_SCORER_OK and copy_engine:
+        logger.info(f"🔍 Copy engine has {len(copy_engine.tracked_wallets)} tracked wallets")
+        if not copy_engine.tracked_wallets:
+            logger.info("🔍 No tracked wallets — loading from leaderboard...")
+            try:
+                mirrors = get_mirrors(min_pnl=50.0, min_win_rate=0.45)
+                if mirrors:
+                    await copy_engine.set_tracked_wallets(mirrors)
+                    logger.info(f"🐋 Now mirroring {len(mirrors)} wallets from leaderboard")
+                    for m in mirrors:
+                        logger.info(
+                            f"   → {m['name']} | {m['wallet'][:20]}... | "
+                            f"Score: {m['tier']} | PnL: +{m['pnl_30d_sol']:.1f} SOL | WinRate: {m['win_rate']:.0%}"
+                        )
+                else:
+                    logger.warning("Leaderboard has no MIRROR-grade wallets")
+            except Exception as e:
+                logger.warning(f"Leaderboard load failed: {e}")
+        else:
+            logger.info(f"🐋 Already tracking {len(copy_engine.tracked_wallets)} wallets — skipping leaderboard load")
 
     if alerts:
         try:

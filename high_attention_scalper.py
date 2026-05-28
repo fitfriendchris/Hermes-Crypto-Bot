@@ -408,18 +408,17 @@ class HighAttentionEngine:
         # 1. LIQUIDITY — must have $10K+ (prevents rug pulls)
         liquidity = token.get('liquidity_usd', 0)
         if liquidity < 10_000:
-            logger.debug(f"💧 {symbol} liquidity too low: ${liquidity:.0f} < $10K")
+            logger.info(f"🚫 {symbol} REJECTED — liquidity: ${liquidity:.0f} < $10K")
             return None
         
         # 2. VOLUME — must have $5K+ 24h (proves activity)
         volume_24h = token.get('volume_24h', 0)
         if volume_24h < 5_000:
-            logger.debug(f"📉 {symbol} 24h volume too low: ${volume_24h:.0f} < $5K")
+            logger.info(f"🚫 {symbol} REJECTED — 24h volume: ${volume_24h:.0f} < $5K")
             return None
         
         # 3. VOLUME — must be active (spiking OR consistently high)
         volume_1h = token.get('volume_1h', 0)
-        volume_24h = token.get('volume_24h', 0)
         
         # Volume thresholds: whitelist = lower, unknown = higher
         min_volume_1h = 10_000 if is_whitelist else 50_000  # $10K for whitelist, $50K for unknown
@@ -429,7 +428,7 @@ class HighAttentionEngine:
         has_spike = self.detect_volume_spike(symbol, volume_1h, volume_24h)
         
         if not has_spike and not high_volume:
-            logger.debug(f"📊 {symbol} NO VOLUME ACTIVITY — SKIPPED (1h=${volume_1h:.0f}, need ${min_volume_1h:,})")
+            logger.info(f"🚫 {symbol} REJECTED — no volume activity (1h=${volume_1h:.0f}, need ${min_volume_1h:,})")
             return None
         
         if has_spike:
@@ -440,42 +439,42 @@ class HighAttentionEngine:
         # 4. PRICE ACTION — must be green 1h (momentum)
         change_1h = token.get('change_1h', 0)
         if change_1h < 2.0:  # At least +2% in last hour
-            logger.debug(f"📉 {symbol} 1h change too low: {change_1h:.1f}% < +2%")
+            logger.info(f"🚫 {symbol} REJECTED — 1h change: {change_1h:.1f}% < +2%")
             return None
         
         # 5. MAX 1H — don't chase if already up 50%+ in 1h (peaked)
         if change_1h > 50.0 and not is_whitelist:
-            logger.debug(f"🚀 {symbol} already up {change_1h:.0f}% in 1h — peaked")
+            logger.info(f"🚫 {symbol} REJECTED — already up {change_1h:.0f}% in 1h (peaked)")
             return None
         
         # 6. MAX 24H — don't chase if already up 200%+ (pump is done)
         change_24h = token.get('change_24h', 0)
         max_24h = 100 if is_whitelist else 50  # TIGHT: 50% for unknown, 100% for whitelist
         if change_24h > max_24h:
-            logger.debug(f"🚀 {symbol} already up {change_24h:.0f}% in 24h — chasing (max {max_24h}%)")
+            logger.info(f"🚫 {symbol} REJECTED — already up {change_24h:.0f}% in 24h (chasing, max {max_24h}%)")
             return None
         
         # 7. NO DUMPERS — skip if down more than 10% recently
         if change_24h < -10:
-            logger.debug(f"📉 {symbol} dumping: {change_24h:.1f}% < -10%")
+            logger.info(f"🚫 {symbol} REJECTED — dumping: {change_24h:.1f}% < -10%")
             return None
         
         # 8. AGE — skip tokens >30 minutes old (pump already happened)
         age_min = token.get('age_minutes', 999)
         if age_min > 30 and not is_whitelist:
-            logger.debug(f"🕐 {symbol} too old: {age_min:.0f}m > 30m (pump done)")
+            logger.info(f"🚫 {symbol} REJECTED — too old: {age_min:.0f}m > 30m")
             return None
         
         # 9. MOMENTUM SCORE — must have strong recent activity
         momentum = token.get('momentum_score', change_1h)
         if momentum < 5.0 and not is_whitelist:
-            logger.debug(f"📊 {symbol} momentum too weak: {momentum:.1f} < 5")
+            logger.info(f"🚫 {symbol} REJECTED — momentum too weak: {momentum:.1f} < 5")
             return None
         
         # 10. HOLDERS — basic check (skip if data unavailable — DexScreener doesn't provide this)
         holders = token.get('holder_count', -1)
         if holders >= 0 and holders < 10 and not is_whitelist:
-            logger.debug(f"👥 {symbol} too few holders: {holders} < 10")
+            logger.info(f"🚫 {symbol} REJECTED — too few holders: {holders} < 10")
             return None
         
         # ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━

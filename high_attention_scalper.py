@@ -38,13 +38,14 @@ HIGH_ATTENTION_CONFIG = {
 }
 
 # Default watchlist — Operator can override
+# NOTE: All tokens must be Jupiter-tradable for live execution
 DEFAULT_WATCHLIST = [
-    {
-        'symbol': 'ATTENTION',
-        'mint': '52xfJnaHZzxAddm74SVyxmdyLJ6qrrW8WN2U3SjmxaVB',
-        'chain': 'solana',
-        'priority': 1,  # Highest
-    },
+    # {
+    #     'symbol': 'ATTENTION',
+    #     'mint': '52xfJnaHZzxAddm74SVyxmdyLJ6qrrW8WN2U3SjmxaVB',
+    #     'chain': 'solana',
+    #     'priority': 1,
+    # },
 ]
 
 

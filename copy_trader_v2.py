@@ -138,20 +138,65 @@ class CopyEngine:
 
         return new_signals
 
-    async def _fetch_recent_txs(self, wallet: str, limit: int = 10) -> List[Dict]:
-        """Fetch recent transactions from Solscan."""
-        url = f"https://public-api.solscan.io/account/transactions?account={wallet}&limit={limit}"
+    async def _fetch_recent_txs(self, wallet: str, limit: int = 5) -> List[Dict]:
+        """Fetch recent transactions with full details via public Solana RPC."""
+        # Step 1: Get signatures
+        sig_payload = {
+            "jsonrpc": "2.0",
+            "id": 1,
+            "method": "getSignaturesForAddress",
+            "params": [wallet, {"limit": limit}]
+        }
         try:
-            async with self._session.get(url, timeout=10) as resp:
-                if resp.status == 200:
-                    data = await resp.json()
-                    return data if isinstance(data, list) else []
-        except Exception:
-            pass
+            async with self._session.post(
+                "https://api.mainnet-beta.solana.com",
+                json=sig_payload,
+                timeout=10
+            ) as resp:
+                if resp.status != 200:
+                    return []
+                data = await resp.json()
+                sigs = data.get("result", [])
+
+            # Step 2: Get full transaction details for each signature
+            txs = []
+            for sig_info in sigs:
+                sig = sig_info.get("signature", "")
+                if not sig:
+                    continue
+                tx_payload = {
+                    "jsonrpc": "2.0",
+                    "id": 1,
+                    "method": "getTransaction",
+                    "params": [
+                        sig,
+                        {"encoding": "json", "maxSupportedTransactionVersion": 0}
+                    ]
+                }
+                try:
+                    async with self._session.post(
+                        "https://api.mainnet-beta.solana.com",
+                        json=tx_payload,
+                        timeout=10
+                    ) as tx_resp:
+                        if tx_resp.status == 200:
+                            tx_data = await tx_resp.json()
+                            tx = tx_data.get("result", {})
+                            if tx:
+                                tx["txHash"] = sig
+                                tx["blockTime"] = sig_info.get("blockTime", 0)
+                                txs.append(tx)
+                    await asyncio.sleep(0.1)  # Rate limit
+                except Exception:
+                    pass
+
+            return txs
+        except Exception as e:
+            logger.debug(f"RPC fetch error: {e}")
         return []
 
     def _parse_buy_signal(self, tx: Dict, wallet: str) -> Optional[Dict]:
-        """Parse a buy signal from a transaction."""
+        """Parse a buy signal from an RPC transaction."""
         tx_hash = tx.get("txHash", "")
         block_time = tx.get("blockTime", 0)
 
@@ -160,36 +205,71 @@ class CopyEngine:
         if now - block_time > 300:
             return None
 
-        # Look for token balance changes
-        for token in tx.get("tokenBalanes", []) or []:
-            if token.get("owner") == wallet:
-                pre = float(token.get("preBalance", 0))
-                post = float(token.get("postBalance", 0))
-                delta = post - pre
+        meta = tx.get("meta", {})
+        pre_tokens = meta.get("preTokenBalances", [])
+        post_tokens = meta.get("postTokenBalances", [])
 
-                if delta > 0:  # Token balance increased = BUY
-                    # Get SOL spent
-                    sol_delta = self._get_sol_delta(tx, wallet)
-                    if sol_delta < 0:
-                        return {
-                            "wallet": wallet,
-                            "tx": tx_hash,
-                            "timestamp": block_time,
-                            "token_mint": token.get("tokenAddress", ""),
-                            "token_symbol": token.get("tokenName", "UNKNOWN"),
-                            "token_amount": delta,
-                            "sol_amount": abs(sol_delta),
-                            "direction": "buy",
-                        }
+        # Find token balance increases for this wallet
+        for post in post_tokens:
+            owner = post.get("owner", "")
+            if owner != wallet:
+                continue
+
+            mint = post.get("mint", "")
+            post_amt = post.get("uiTokenAmount", {}).get("uiAmount", 0) or 0
+
+            # Find matching pre-balance
+            pre_amt = 0
+            for pre in pre_tokens:
+                if pre.get("mint") == mint and pre.get("owner") == wallet:
+                    pre_amt = pre.get("uiTokenAmount", {}).get("uiAmount", 0) or 0
+
+            delta = post_amt - pre_amt
+            if delta > 0:  # Token balance increased = BUY
+                # Get SOL spent from native balance change
+                sol_delta = self._get_sol_delta(tx, wallet)
+                if sol_delta < 0:
+                    return {
+                        "wallet": wallet,
+                        "tx": tx_hash,
+                        "timestamp": block_time,
+                        "token_mint": mint,
+                        "token_symbol": mint[:8] + "...",  # Shortened
+                        "token_amount": delta,
+                        "sol_amount": abs(sol_delta),
+                        "direction": "buy",
+                    }
 
         return None
 
     def _get_sol_delta(self, tx: Dict, wallet: str) -> float:
-        """Get SOL balance change for wallet."""
-        # Approximate: use lamport balance change
-        pre = tx.get("lamportBalance", {}).get("preBalance", 0)
-        post = tx.get("lamportBalance", {}).get("postBalance", 0)
-        return post - pre
+        """Get SOL balance change for wallet from RPC tx."""
+        meta = tx.get("meta", {})
+        account_keys = tx.get("transaction", {}).get("message", {}).get("accountKeys", [])
+
+        # Find wallet index
+        wallet_idx = None
+        for i, acc in enumerate(account_keys):
+            if isinstance(acc, str):
+                if acc == wallet:
+                    wallet_idx = i
+                    break
+            elif acc.get("pubkey") == wallet:
+                wallet_idx = i
+                break
+
+        if wallet_idx is None:
+            return 0.0
+
+        pre_lamports = meta.get("preBalances", [])
+        post_lamports = meta.get("postBalances", [])
+
+        if wallet_idx < len(pre_lamports) and wallet_idx < len(post_lamports):
+            pre = pre_lamports[wallet_idx]
+            post = post_lamports[wallet_idx]
+            return (post - pre) / 1e9  # Convert to SOL
+
+        return 0.0
 
     # ── EXECUTE COPY ──
 

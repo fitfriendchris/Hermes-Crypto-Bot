@@ -2027,9 +2027,9 @@ async def copy_trader_v2_loop():
                         ) as test_resp:
                             if test_resp.status == 200:
                                 dry_run_pass = True
-                                logger.debug(f"Copy v2 dry-run OK for {token_mint[:20]}...")
+                                logger.info(f"✅ Copy v2 dry-run OK for {token_mint[:20]}...")
                             else:
-                                logger.info(f"🚫 Copy v2 target not on Jupiter — skipping")
+                                logger.info(f"🚫 Copy v2 target not on Jupiter ({test_resp.status}) — skipping")
                 except Exception:
                     pass
                 if not dry_run_pass:
@@ -2067,13 +2067,14 @@ async def copy_trader_v2_loop():
                     pass
 
                 if entry_price <= 0:
-                    logger.debug(f"Copy price fetch failed for {token_mint[:20]}...")
+                    logger.info(f"🚫 Copy price fetch failed for {token_mint[:20]}...")
                     continue
 
                 # Build position directly — skip evaluate_entry() for copy trades
                 # Whale-verified trades don't need DEX-screening criteria
                 invested = min(COPY_CONFIG["position_size_usd"], state.balance * COPY_CONFIG["max_position_pct"])
                 if invested <= 0 or invested > state.balance:
+                    logger.info(f"🚫 Copy position size invalid: ${invested:.2f} (balance: ${state.balance:.2f})")
                     continue
 
                 pos = {

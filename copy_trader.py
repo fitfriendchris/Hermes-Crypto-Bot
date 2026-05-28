@@ -53,8 +53,10 @@ class CopyEngine:
         self._session = aiohttp.ClientSession(
             timeout=aiohttp.ClientTimeout(total=30)
         )
-        self._load_state()
-        logger.info("Copy engine initialized")
+        # Don't load stale scoreboard — leaderboard is source of truth
+        self.tracked_wallets = {}
+        self.active_copies = {}
+        logger.info("Copy engine initialized (fresh start)")
 
     async def close(self):
         if self._session and not self._session.closed:
@@ -86,18 +88,21 @@ class CopyEngine:
     # ── WALLET MONITORING ──
 
     async def set_tracked_wallets(self, wallets: List[Dict]):
-        """Set wallets to monitor (from wallet scorer)."""
+        """Set wallets to monitor (from wallet scorer/leaderboard)."""
+        # Clear old and load fresh
+        self.tracked_wallets = {}
         for w in wallets:
             addr = w.get("wallet", "")
-            if addr and addr not in self.tracked_wallets:
+            if addr:
                 self.tracked_wallets[addr] = {
-                    "score": w.get("composite_score", 0),
+                    "score": w.get("composite_score", w.get("pnl_30d_sol", 0)),
                     "tier": w.get("tier", "?"),
                     "win_rate": w.get("win_rate", 0),
+                    "name": w.get("name", "Unknown"),
                     "last_tx_count": 0,
                     "last_checked": None,
                 }
-                logger.info(f"🔭 Now tracking: {addr[:20]}... (score: {w.get('composite_score', 0):.1f})")
+                logger.info(f"🔭 Now tracking: {addr[:20]}... ({w.get('name', '?')} | {w.get('tier', '?')} | {w.get('pnl_30d_sol', 0):.1f} SOL)")
 
         self._save_state()
 

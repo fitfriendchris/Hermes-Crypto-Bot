@@ -50,6 +50,16 @@ except ImportError as e:
     COPY_OK = False
     print(f"[WARN] Copy trader unavailable: {e}")
 
+# ── NEW: Wallet Scorer + Discovery + Copy Engine ──
+try:
+    from wallet_scorer import WalletScorer, init_wallet_scorer
+    from wallet_discovery import WalletDiscovery, init_wallet_discovery
+    from copy_trader_v2 import CopyEngine
+    WALLET_SCORER_OK = True
+except ImportError as e:
+    WALLET_SCORER_OK = False
+    print(f"[WARN] Wallet system unavailable: {e}")
+
 try:
     from dex_connector import DEXConnector
     DEX_OK = True
@@ -249,6 +259,11 @@ wallet = WalletManager() if WALLET_OK else None
 swap_manager = SwapManager(wallet) if SWAP_OK and wallet else None
 sweeper = ProfitSweeper(wallet, swap_manager) if SWEEPER_OK else None
 wallet_ready = False
+
+# ── NEW: Wallet Scoring + Discovery + Copy Engine ──
+scorer = WalletScorer() if WALLET_SCORER_OK else None
+discovery = WalletDiscovery(scorer) if WALLET_SCORER_OK else None
+copy_engine = CopyEngine(wallet, swap_manager) if WALLET_SCORER_OK else None
 
 # ── WALLET INIT ──
 async def init_wallet():
@@ -1790,6 +1805,112 @@ async def copy_loop():
         await asyncio.sleep(20)
 
 
+async def copy_trader_v2_loop():
+    """NEW: Wallet-scored copy trader loop. Runs in HIGH_ATTENTION mode too.
+    
+    Scans tracked wallets for new buys, mirrors with smart sizing.
+    Replaces the old COPY mode loop with a real system.
+    """
+    global paused
+
+    if not WALLET_SCORER_OK or not copy_engine:
+        logger.warning("copy_trader_v2: engine not available; loop will idle")
+        while True:
+            await asyncio.sleep(60)
+
+    while True:
+        try:
+            if paused:
+                await asyncio.sleep(30)
+                continue
+
+            # Only run if we have tracked wallets
+            if not copy_engine.tracked_wallets:
+                logger.debug("No tracked wallets — skipping copy scan")
+                await asyncio.sleep(60)
+                continue
+
+            # Check position limit
+            if len(state.positions) >= CONFIG['account']['max_open_positions']:
+                await asyncio.sleep(60)
+                continue
+
+            # Scan for new trades from tracked wallets
+            signals = await copy_engine.scan_for_new_trades()
+            for signal in signals:
+                # Check circuits
+                if not _circuits_pass():
+                    break
+
+                # Get token data for entry evaluation
+                token_mint = signal.get("token_mint", "")
+                if not token_mint:
+                    continue
+
+                # Anti-rug check
+                if ANTIRUG_OK:
+                    rug_result = await run_full_rug_check(token_mint)
+                    if not rug_result['safe']:
+                        logger.warning(f"🚫 Copy target blocked by anti-rug: {rug_result['flags']}")
+                        continue
+
+                # Execute copy
+                position = await copy_engine.execute_copy(signal, state.balance)
+                if position:
+                    sym = position['token']
+                    _block_reentry(sym)
+
+                    # Add to bot state
+                    if position.get('paper'):
+                        await paper_buy(position)
+                    else:
+                        state.balance -= position['invested']
+                        state.positions[sym] = position
+                        state.trades_today += 1
+                        state.save()
+
+                    logger.info(
+                        f"🐋 COPY v2: {sym} | ${position['invested']:.2f} | "
+                        f"From: {signal['wallet'][:20]}... | "
+                        f"Tx: {signal['tx'][:20]}..."
+                    )
+
+                    if alerts:
+                        try:
+                            await alerts.send_info(
+                                f"🐋 COPY TRADE\n"
+                                f"Token: {sym}\n"
+                                f"Size: ${position['invested']:.2f}\n"
+                                f"Copied from: {signal['wallet'][:20]}...\n"
+                                f"Source tx: {signal['tx'][:20]}..."
+                            )
+                        except Exception:
+                            pass
+
+                    # One copy per cycle to avoid overexposure
+                    break
+
+            # Periodic re-discovery (every 6 hours)
+            # This is crude — better to use a cron or separate task
+            hour = datetime.now().hour
+            minute = datetime.now().minute
+            if hour % 6 == 0 and minute < 2 and discovery:
+                try:
+                    logger.info("🔄 Running scheduled wallet re-discovery...")
+                    scored = await discovery.run_discovery_cycle()
+                    mirrors = discovery.get_top_mirrors(n=3)
+                    if mirrors:
+                        await copy_engine.set_tracked_wallets(mirrors)
+                        logger.info(f"🐋 Updated mirrors: {len(mirrors)} wallets")
+                except Exception as e:
+                    logger.warning(f"Re-discovery failed: {e}")
+
+        except Exception as e:
+            logger.error(f"copy_trader_v2_loop error: {e}")
+
+        await asyncio.sleep(15)  # 15s scan cycle — faster than old 20s
+
+
 async def monitor_loop():
     """Monitor open positions for exits."""
     global paused
@@ -1934,12 +2055,35 @@ async def main():
         await init_copy_trader()
         logger.info("🐋 Copy trader: ACTIVE")
 
+    # Initialize new wallet scoring + discovery
+    if WALLET_SCORER_OK and scorer:
+        await scorer.initialize()
+        await discovery.initialize()
+        await copy_engine.initialize()
+        logger.info("📊 Wallet scorer + discovery + copy engine: ACTIVE")
+
     # Initialize high-attention scalper
     if HIGH_ATTENTION_OK:
         await init_high_attention()
         logger.info("🔥 High-attention scalper: ACTIVE")
 
     await init_wallet()
+
+    # After wallet init, run wallet discovery if no tracked wallets
+    if WALLET_SCORER_OK and copy_engine and not copy_engine.tracked_wallets:
+        logger.info("🔍 No tracked wallets — running discovery...")
+        try:
+            scored = await discovery.run_discovery_cycle()
+            mirrors = discovery.get_top_mirrors(n=3)
+            if mirrors:
+                await copy_engine.set_tracked_wallets(mirrors)
+                logger.info(f"🐋 Now mirroring {len(mirrors)} wallets")
+                for m in mirrors:
+                    logger.info(f"   → {m['wallet'][:20]}... | Score: {m.get('composite_score', 0):.1f} | PnL: {m.get('total_pnl_sol', 0):+.4f} SOL")
+            else:
+                logger.warning("Discovery found no MIRROR-grade wallets")
+        except Exception as e:
+            logger.warning(f"Discovery cycle failed: {e}")
 
     if alerts:
         try:
@@ -1961,8 +2105,9 @@ async def main():
     tasks = [
         asyncio.create_task(discovery_loop()),
         asyncio.create_task(copy_loop()),
+        asyncio.create_task(copy_trader_v2_loop()),  # NEW: wallet-based copy trading
         asyncio.create_task(sniper_loop()),
-        asyncio.create_task(high_attention_loop()),  # 🔥 NEW
+        asyncio.create_task(high_attention_loop()),
         asyncio.create_task(monitor_loop()),
         asyncio.create_task(report_loop()),
         asyncio.create_task(save_loop()),

@@ -2130,7 +2130,9 @@ async def report_loop():
             state.update_drawdown(val)
 
             # Max drawdown circuit breaker
-            if state.max_drawdown > CONFIG['account']['max_drawdown_pct']:
+            # Only pause if drawdown happened TODAY (trades_today > 0)
+            # This prevents stale pause from yesterday's losses
+            if state.max_drawdown > CONFIG['account']['max_drawdown_pct'] and state.trades_today > 0:
                 logger.warning(f"🚨 MAX DRAWDOWN HIT: {state.max_drawdown:.1%} — pausing new entries")
                 global paused
                 paused = True

@@ -1,5 +1,5 @@
 {
-  "balance": 76.83,
+  "balance": 76.84,
   "positions": {},
   "history": [
     {
@@ -57,14 +57,14 @@
     }
   ],
   "daily_pnl": 0.0,
-  "weekly_pnl": -12.007519612661442,
+  "weekly_pnl": 0.0,
   "trades_today": 2,
-  "consecutive_losses": 4,
+  "consecutive_losses": 0,
   "max_drawdown": 0.25676104862953397,
   "total_protected": 0,
   "halt_entries_until": null,
   "halt_reason": "",
-  "day_start_balance": 76.83,
-  "week_start_balance": 76.83,
+  "day_start_balance": 76.84,
+  "week_start_balance": 76.84,
   "timestamp": "2026-05-28T10:44:09.411840"
 }

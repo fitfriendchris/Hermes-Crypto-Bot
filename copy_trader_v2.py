@@ -292,6 +292,32 @@ class CopyEngine:
             logger.warning(f"💰 Balance too low for copy: ${balance:.2f}")
             return None
 
+        # ── SELL-ROUTE VALIDATION: Confirm Jupiter can sell this token BEFORE buying ──
+        sell_route_ok = False
+        try:
+            test_payload = {
+                "inputMint": token,
+                "outputMint": COPY_CONFIG["sol_mint"],
+                "amount": "1000000",
+                "slippageBps": "300"
+            }
+            async with aiohttp.ClientSession() as test_session:
+                async with test_session.get(
+                    COPY_CONFIG["jupiter_quote_url"],
+                    params=test_payload,
+                    timeout=5
+                ) as test_resp:
+                    if test_resp.status == 200:
+                        sell_route_ok = True
+                        logger.info(f"✅ Copy sell route confirmed for {symbol}")
+                    else:
+                        logger.warning(f"🚫 No Jupiter SELL route for {symbol} — blocking copy (status {test_resp.status})")
+        except Exception as e:
+            logger.warning(f"🚫 Sell route check failed for {symbol}: {e}")
+
+        if not sell_route_ok:
+            return None
+
         # Get SOL price for lamport conversion
         sol_price = await self._get_sol_price()
         if sol_price <= 0:

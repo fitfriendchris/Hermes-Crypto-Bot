@@ -624,9 +624,16 @@ def _circuits_pass() -> bool:
     if state.week_start_balance > 0:
         weekly_dd = (state.week_start_balance + state.weekly_pnl) / state.week_start_balance - 1
         if weekly_dd <= -weekly_pct_cap:
-            state.halt_entries_until = (datetime.now() + timedelta(hours=168)).isoformat()
+            # Adaptive cooldown: scale with drawdown severity
+            if weekly_dd <= -0.20:
+                cool_hours = 72  # -20% = 3 days (was 7)
+            elif weekly_dd <= -0.10:
+                cool_hours = 48  # -10% = 2 days
+            else:
+                cool_hours = 24   # -5% = 1 day
+            state.halt_entries_until = (datetime.now() + timedelta(hours=cool_hours)).isoformat()
             state.halt_reason = f"weekly_loss_circuit ({weekly_dd:.2%})"
-            logger.warning(f"⛔ CIRCUIT FIRED: {state.halt_reason} — entries halted 7d")
+            logger.warning(f"⛔ CIRCUIT FIRED: {state.halt_reason} — entries halted {cool_hours}h")
             return False
 
     # Absolute floor (legacy) — fires if pct check didn't but dollar loss exceeded
@@ -1985,9 +1992,17 @@ async def copy_trader_v2_loop():
             # Scan for new trades from tracked wallets
             signals = await copy_engine.scan_for_new_trades()
             for signal in signals:
-                # Check circuits
+                # Check circuits BEFORE executing
                 if not _circuits_pass():
+                    logger.warning("⛔ Copy trade blocked — circuit breaker active")
                     break
+
+                # Mode check: copy trading only in COPY or HIGH_ATTENTION modes
+                current_mode = get_mode()
+                if current_mode not in (MODE_COPY, MODE_HIGH_ATTENTION):
+                    logger.debug(f"Copy loop idle — mode={current_mode}, not COPY/HIGH_ATTENTION")
+                    await asyncio.sleep(60)
+                    continue
 
                 # Get token data for entry evaluation
                 token_mint = signal.get("token_mint", "")
@@ -2027,41 +2042,66 @@ async def copy_trader_v2_loop():
                         logger.warning(f"🚫 Copy target blocked by anti-rug: {rug_result['flags']}")
                         continue
 
-                # Execute copy
-                position = await copy_engine.execute_copy(signal, state.balance)
-                if position:
-                    sym = position['token']
-                    _block_reentry(sym)
+                # Execute copy with proper entry evaluation
+                # First synthesize token dict for evaluate_entry
+                token_dict = {
+                    'symbol': signal.get('token_symbol', 'UNKNOWN'),
+                    'priceUsd': 0,  # Will be updated
+                    'tokenAddress': token_mint,
+                    'liquidity': {'usd': 100_000},  # Assumed for copy trades
+                    'priceChange': {'h24': 0},
+                    'info': {'socials': ['verified_wallet'], 'websites': ['verified_wallet']},
+                }
 
-                    # Add to bot state
-                    if position.get('paper'):
-                        await paper_buy(position)
-                    else:
-                        state.balance -= position['invested']
-                        state.positions[sym] = position
-                        state.trades_today += 1
-                        state.save()
+                # Get price from Jupiter quote
+                try:
+                    async with aiohttp.ClientSession() as price_session:
+                        price_payload = {
+                            "inputMint": COPY_CONFIG["sol_mint"],
+                            "outputMint": token_mint,
+                            "amount": "100000000",
+                            "slippageBps": "300"
+                        }
+                        async with price_session.get(
+                            COPY_CONFIG["jupiter_quote_url"],
+                            params=price_payload,
+                            timeout=5
+                        ) as price_resp:
+                            if price_resp.status == 200:
+                                price_data = await price_resp.json()
+                                if price_data.get('data'):
+                                    out_amount = float(price_data['data'].get('outAmount', 0))
+                                    in_amount = float(price_data['data'].get('inAmount', 1))
+                                    token_dict['priceUsd'] = (0.1 * out_amount) / in_amount if in_amount > 0 else 0
+                except Exception:
+                    pass
 
-                    logger.info(
-                        f"🐋 COPY v2: {sym} | ${position['invested']:.2f} | "
-                        f"From: {signal['wallet'][:20]}... | "
-                        f"Tx: {signal['tx'][:20]}..."
-                    )
+                # Now run through main entry evaluation
+                pos = await evaluate_entry(token_dict)
+                if not pos:
+                    continue
 
-                    if alerts:
-                        try:
-                            await alerts.send_info(
-                                f"🐋 COPY TRADE\n"
-                                f"Token: {sym}\n"
-                                f"Size: ${position['invested']:.2f}\n"
-                                f"Copied from: {signal['wallet'][:20]}...\n"
-                                f"Source tx: {signal['tx'][:20]}..."
-                            )
-                        except Exception:
-                            pass
+                # Override with copy-specific sizing
+                pos['invested'] = min(COPY_CONFIG["position_size_usd"], state.balance * COPY_CONFIG["max_position_pct"])
+                pos['quantity'] = pos['invested'] / pos['entry'] if pos['entry'] > 0 else 0
+                pos['source'] = 'copy_trader_v2'
+                pos['wallet_id'] = signal['wallet']
+                pos['wallet_name'] = signal.get('wallet_name', 'Unknown')
+                pos['mode_at_entry'] = MODE_COPY
+                pos['copied_from'] = signal['wallet']
+                pos['source_tx'] = signal['tx']
 
-                    # One copy per cycle to avoid overexposure
-                    break
+                _block_reentry(pos['token'])
+                if LIVE_MODE and wallet_ready:
+                    await live_buy(pos)
+                else:
+                    await paper_buy(pos)
+
+                logger.info(
+                    f"🐋 COPY v2: {pos['token']} | ${pos['invested']:.2f} | "
+                    f"From: {signal['wallet'][:20]}... | "
+                    f"Tx: {signal['tx'][:20]}..."
+                )
 
             # Periodic re-discovery (every 6 hours)
             # This is crude — better to use a cron or separate task

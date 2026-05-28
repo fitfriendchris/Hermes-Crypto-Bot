@@ -1218,6 +1218,36 @@ async def live_buy(position: Dict):
         await paper_buy(position)
         return
 
+    # ── SELL-ROUTE VALIDATION: Confirm Jupiter can sell this token BEFORE buying ──
+    # This prevents buying tokens that can't be exited (common with micro-caps)
+    sell_route_ok = False
+    try:
+        import aiohttp
+        test_payload = {
+            "inputMint": addr,
+            "outputMint": "So11111111111111111111111111111111111111112",
+            "amount": "1000000",
+            "slippageBps": "200"
+        }
+        async with aiohttp.ClientSession() as test_session:
+            async with test_session.get(
+                "https://api.jup.ag/swap/v1/quote",
+                params=test_payload,
+                timeout=5
+            ) as test_resp:
+                if test_resp.status == 200:
+                    sell_route_ok = True
+                    logger.info(f"✅ Sell route confirmed for {sym}")
+                else:
+                    logger.warning(f"🚫 No Jupiter SELL route for {sym} — blocking buy (status {test_resp.status})")
+    except Exception as e:
+        logger.warning(f"🚫 Sell route check failed for {sym}: {e}")
+
+    if not sell_route_ok:
+        logger.info(f"LIVE BUY {sym} — no sell route; executing as paper")
+        await paper_buy(position)
+        return
+
     invested_usd = position['invested']
     lamports = await swap_manager.usd_to_lamports(invested_usd)
     if lamports < 100_000:

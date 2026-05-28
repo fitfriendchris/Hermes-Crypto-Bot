@@ -58,13 +58,15 @@
   ],
   "daily_pnl": 0.0,
   "weekly_pnl": 0.0,
-  "trades_today": 2,
+  "trades_today": 0,
   "consecutive_losses": 0,
-  "max_drawdown": 0.25676104862953397,
+  "max_drawdown": 0.9987999999999999,
   "total_protected": 0,
   "halt_entries_until": null,
   "halt_reason": "",
   "day_start_balance": 0.12,
   "week_start_balance": 0.12,
-  "timestamp": "2026-05-28T16:41:19.103427"
+  "timestamp": "2026-05-28T16:55:37.077734",
+  "starting_balance": 100.0,
+  "max_balance": 100.0
 }

@@ -6,13 +6,11 @@ from datetime import datetime, timedelta
 with open('state/HERMES_CRYPTO_STATE.json', 'r') as f:
     state = json.load(f)
 
-# Reset circuit breaker
+# ONLY reset circuit breaker — DO NOT touch balance tracking
 state['halt_entries_until'] = None
 state['halt_reason'] = ''
 state['weekly_pnl'] = 0.0
 state['consecutive_losses'] = 0
-state['week_start_balance'] = state.get('balance', 76.70)
-state['day_start_balance'] = state.get('balance', 76.70)
 
 # Save
 with open('state/HERMES_CRYPTO_STATE.json', 'w') as f:

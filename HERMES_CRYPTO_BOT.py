@@ -1015,6 +1015,14 @@ async def paper_sell(sym: str, price: float, reason: str):
     if not pos:
         return
 
+    # ── HARD STOP-LOSS: Auto-exit any position down >25% ──
+    entry = pos.get('entry', 0)
+    if entry > 0 and price > 0:
+        drawdown = (price - entry) / entry
+        if drawdown <= -0.25 and reason != 'stop_loss':
+            logger.warning(f"🚨 HARD STOP {sym}: {drawdown:+.1%} drawdown — forcing full exit")
+            reason = 'stop_loss'
+
     portion = _compute_sell_portion(pos, price, reason)
     pyramid_this = False  # pyramid path is config-gated; preserved for compatibility
 
@@ -1598,6 +1606,33 @@ async def discovery_loop():
                     logger.debug(f"⏱️ {sym} — reentry blocked ({_REENTRY_BLOCK_MIN}m cooldown)")
                     continue
 
+                # ── DRY-RUN: Confirm Jupiter route exists BEFORE buying ──
+                dry_run_pass = False
+                try:
+                    test_payload = {
+                        "inputMint": "So11111111111111111111111111111111111111112",
+                        "outputMint": token_address,
+                        "amount": "1000000",
+                        "slippageBps": "200"
+                    }
+                    async with aiohttp.ClientSession() as test_session:
+                        async with test_session.get(
+                            "https://api.jup.ag/swap/v1/quote",
+                            params=test_payload,
+                            timeout=5
+                        ) as test_resp:
+                            if test_resp.status == 200:
+                                dry_run_pass = True
+                                logger.debug(f"Jupiter dry-run OK for {sym}")
+                            else:
+                                logger.info(f"Jupiter dry-run FAIL for {sym}: {test_resp.status} — skipping")
+                except Exception as e:
+                    logger.debug(f"Dry-run error for {sym}: {e}")
+
+                if not dry_run_pass:
+                    logger.info(f"🚫 No Jupiter route for {sym} — skipping")
+                    continue
+
                 # ── PRE-FILTER: hard minimums before expensive momentum check ──
                 vol_24h = float(token.get('volume', {}).get('h24', 0))
                 liq_usd = float(token.get('liquidity', {}).get('usd', 0))
@@ -1612,6 +1647,33 @@ async def discovery_loop():
                         continue
                     token = enhanced
                     logger.info(f"📈 MOMENTUM: {sym} | Score: {token.get('momentum_score', 0):.0f}")
+
+                # ── DRY-RUN: Confirm Jupiter route exists BEFORE buying ──
+                dry_run_pass = False
+                try:
+                    test_payload = {
+                        "inputMint": "So11111111111111111111111111111111111111112",
+                        "outputMint": token_address,
+                        "amount": "1000000",
+                        "slippageBps": "200"
+                    }
+                    async with aiohttp.ClientSession() as test_session:
+                        async with test_session.get(
+                            "https://api.jup.ag/swap/v1/quote",
+                            params=test_payload,
+                            timeout=5
+                        ) as test_resp:
+                            if test_resp.status == 200:
+                                dry_run_pass = True
+                                logger.debug(f"Jupiter dry-run OK for {sym}")
+                            else:
+                                logger.info(f"Jupiter dry-run FAIL for {sym}: {test_resp.status} — skipping")
+                except Exception as e:
+                    logger.debug(f"Dry-run error for {sym}: {e}")
+
+                if not dry_run_pass:
+                    logger.info(f"🚫 No Jupiter route for {sym} — skipping")
+                    continue
 
                 pos = await evaluate_entry(token)
                 if pos:
@@ -1636,16 +1698,42 @@ async def discovery_loop():
             # Copy trading lives in its own mode-gated loop (copy_loop below).
             # The momentum/sniper scanner here ONLY runs in SNIPER mode.
 
-            # ── LAUNCH SNIPER ──
-            if SNIPER_OK:
-                try:
-                    from launch_sniper import evaluate_launch
-                    snipe_result = await evaluate_launch({'symbol': 'SCAN', 'address': ''})
-                    # Actually we need to pass the token from the sniper
-                    # For now, let the sniper loop handle it separately
-                    pass
-                except Exception as e:
-                    logger.error(f"Launch sniper error: {e}")
+        except Exception as e:
+            logger.error(f"Discovery error: {e}")
+
+        await asyncio.sleep(30)   # 30s cycle — 2× faster signal detection
+    if pos:
+        pos['source'] = 'momentum' if MOMENTUM_OK else 'scanner'
+        pos['momentum_score'] = token.get('momentum_score', 0)
+        _block_reentry(sym)   # ← lock out re-entry the moment we buy
+
+        if LIVE_MODE and wallet_ready:
+            await live_buy(pos)
+        else:
+            await paper_buy(pos)
+
+        if alerts:
+            try:
+                await alerts.send_info(
+                    f"🔍 DEX Discovery: {sym}\n"
+                    f"Entry: ${pos['entry']:.6f} | Size: ${pos['invested']:.2f} | Score: {pos.get('score', 0)}"
+                )
+            except Exception as e:
+                logger.warning(f"Telegram alert failed: {e}")
+
+    # Copy trading lives in its own mode-gated loop (copy_loop below).
+    # The momentum/sniper scanner here ONLY runs in SNIPER mode.
+
+    # ── LAUNCH SNIPER ──
+    if SNIPER_OK:
+        try:
+            from launch_sniper import evaluate_launch
+            snipe_result = await evaluate_launch({'symbol': 'SCAN', 'address': ''})
+            # Actually we need to pass the token from the sniper
+            # For now, let the sniper loop handle it separately
+            pass
+        except Exception as e:
+            logger.error(f"Launch sniper error: {e}")
 
         except Exception as e:
             logger.error(f"Discovery error: {e}")
@@ -1771,6 +1859,34 @@ async def copy_loop():
                 if sym in state.positions or _is_reentry_blocked(sym):
                     continue
 
+                # DRY-RUN: Validate Jupiter route exists before mirroring
+                token_address = result.get('address', '')
+                if token_address:
+                    dry_run_pass = False
+                    try:
+                        import aiohttp
+                        test_payload = {
+                            "inputMint": "So11111111111111111111111111111111111111112",
+                            "outputMint": token_address,
+                            "amount": "1000000",
+                            "slippageBps": "200"
+                        }
+                        async with aiohttp.ClientSession() as test_session:
+                            async with test_session.get(
+                                "https://api.jup.ag/swap/v1/quote",
+                                params=test_payload,
+                                timeout=5
+                            ) as test_resp:
+                                if test_resp.status == 200:
+                                    dry_run_pass = True
+                                    logger.debug(f"Copy dry-run OK for {sym}")
+                                else:
+                                    logger.info(f"🚫 Copy target {sym} not on Jupiter — skipping")
+                    except Exception:
+                        pass
+                    if not dry_run_pass:
+                        continue
+
                 # Synthesize the token dict that evaluate_entry expects
                 pos = await evaluate_entry({
                     'symbol': sym,
@@ -1848,6 +1964,32 @@ async def copy_trader_v2_loop():
                 if not token_mint:
                     continue
 
+                # DRY-RUN: Validate Jupiter route before ANY copy trade
+                dry_run_pass = False
+                try:
+                    import aiohttp
+                    test_payload = {
+                        "inputMint": "So11111111111111111111111111111111111111112",
+                        "outputMint": token_mint,
+                        "amount": "1000000",
+                        "slippageBps": "200"
+                    }
+                    async with aiohttp.ClientSession() as test_session:
+                        async with test_session.get(
+                            "https://api.jup.ag/swap/v1/quote",
+                            params=test_payload,
+                            timeout=5
+                        ) as test_resp:
+                            if test_resp.status == 200:
+                                dry_run_pass = True
+                                logger.debug(f"Copy v2 dry-run OK for {token_mint[:20]}...")
+                            else:
+                                logger.info(f"🚫 Copy v2 target not on Jupiter — skipping")
+                except Exception:
+                    pass
+                if not dry_run_pass:
+                    continue
+
                 # Anti-rug check
                 if ANTIRUG_OK:
                     rug_result = await run_full_rug_check(token_mint)
@@ -1921,6 +2063,18 @@ async def monitor_loop():
                 price = await get_position_price(sym, pos)
                 if not price:
                     continue
+
+                # ── HARD STOP-LOSS: Force exit any position down >25% ──
+                entry = pos.get('entry', 0)
+                if entry > 0:
+                    drawdown = (price - entry) / entry
+                    if drawdown <= -0.25:
+                        logger.warning(f"🚨 MONITOR HARD STOP {sym}: {drawdown:+.1%} — forcing exit")
+                        if LIVE_MODE and wallet_ready:
+                            await live_sell(sym, price, 'stop_loss')
+                        else:
+                            await paper_sell(sym, price, 'stop_loss')
+                        continue  # Position handled, move to next
 
                 reason = check_exit(sym, price)
                 if reason:
@@ -2106,17 +2260,14 @@ async def main():
         logger.info("💸 Profit sweeper: NOT LOADED")
 
     tasks = [
-        asyncio.create_task(discovery_loop()),
-        asyncio.create_task(copy_loop()),
-        asyncio.create_task(copy_trader_v2_loop()),  # NEW: wallet-based copy trading
-        asyncio.create_task(sniper_loop()),
-        asyncio.create_task(high_attention_loop()),
+        asyncio.create_task(copy_trader_v2_loop()),  # ONLY copy trading — verified wallets
         asyncio.create_task(monitor_loop()),
         asyncio.create_task(report_loop()),
         asyncio.create_task(save_loop()),
         asyncio.create_task(daily_report_loop()),
     ]
 
+    # Optional: sweep profits to cold wallet
     if sweeper:
         tasks.append(asyncio.create_task(sweep_loop()))
 

@@ -21,6 +21,7 @@ SOLSCAN_API = "https://public-api.solscan.io"
 
 # Helius RPC (free tier, 1M requests/month)
 HELIUS_API = "https://mainnet.helius-rpc.com/?api-key=1b648949-7c0e-4167-aaf2-3f7ad6d90e15"
+HELIUS_RPC = "https://mainnet.helius-rpc.com/?api-key=1b648949-7c0e-4167-aaf2-3f7ad6d90e15"
 
 # Jupiter price API (for USD valuation)
 JUPITER_PRICE_URL = "https://api.jup.ag/price/v2"
@@ -47,46 +48,72 @@ class WalletScorer:
     # ── CORE: FETCH TRANSACTIONS ──
 
     async def fetch_transactions(self, wallet: str, days: int = 90, limit: int = 200) -> List[Dict]:
-        """Fetch token swap transactions for a wallet."""
+        """Fetch token swap transactions for a wallet via Helius RPC."""
         txs = []
-        offset = 0
-        batch = 50
 
-        while len(txs) < limit and offset < limit:
-            url = f"{SOLSCAN_API}/account/transactions?account={wallet}&limit={batch}&offset={offset}"
-            try:
-                async with self._session.get(url, timeout=10) as resp:
-                    if resp.status != 200:
-                        logger.debug(f"Solscan {resp.status} for {wallet[:20]}...")
-                        break
+        # Use Helius getSignaturesForAddress + getTransaction
+        payload = {
+            "jsonrpc": "2.0",
+            "id": 1,
+            "method": "getSignaturesForAddress",
+            "params": [
+                wallet,
+                {"limit": min(limit, 100)}
+            ]
+        }
+
+        try:
+            async with self._session.post(HELIUS_RPC, json=payload, timeout=15) as resp:
+                if resp.status == 200:
                     data = await resp.json()
-                    batch_txs = data if isinstance(data, list) else []
-                    if not batch_txs:
-                        break
+                    sigs = data.get("result", [])
+                    if not sigs:
+                        return []
 
-                    for tx in batch_txs:
-                        # Filter for Jupiter/Raydium swap transactions
-                        if self._is_swap_tx(tx):
-                            txs.append(tx)
+                    # Fetch transaction details for each signature
+                    for sig_info in sigs[:50]:  # Limit to 50 for speed
+                        sig = sig_info.get("signature", "")
+                        if not sig:
+                            continue
 
-                    offset += len(batch_txs)
-                    await asyncio.sleep(0.3)  # Rate limit respect
-            except Exception as e:
-                logger.warning(f"Solscan fetch error: {e}")
-                break
+                        tx_payload = {
+                            "jsonrpc": "2.0",
+                            "id": 1,
+                            "method": "getTransaction",
+                            "params": [
+                                sig,
+                                {"encoding": "json", "maxSupportedTransactionVersion": 0}
+                            ]
+                        }
+                        try:
+                            async with self._session.post(HELIUS_RPC, json=tx_payload, timeout=10) as tx_resp:
+                                if tx_resp.status == 200:
+                                    tx_data = await tx_resp.json()
+                                    tx = tx_data.get("result", {})
+                                    if tx and self._is_swap_tx(tx):
+                                        txs.append(tx)
+                        except Exception:
+                            pass
 
-        return txs[:limit]
+                        await asyncio.sleep(0.05)  # Rate limit
+
+        except Exception as e:
+            logger.warning(f"Helius fetch error: {e}")
+
+        return txs
 
     def _is_swap_tx(self, tx: Dict) -> bool:
-        """Check if transaction is a DEX swap (Jupiter/Raydium/PumpSwap)."""
-        # Check program IDs in instructions
-        progs = set()
-        for ix in tx.get("parsedInstruction", []) or []:
-            prog = ix.get("programId", "")
-            if prog:
-                progs.add(prog)
+        """Check if transaction is a DEX swap."""
+        meta = tx.get("meta", {})
+        # Look for token balance changes (indicates SPL activity)
+        pre_balances = meta.get("preTokenBalances", [])
+        post_balances = meta.get("postTokenBalances", [])
 
-        # Known DEX programs
+        # Check for Jupiter/Raydium program IDs in instructions
+        transaction = tx.get("transaction", {})
+        message = transaction.get("message", {})
+        instructions = message.get("instructions", [])
+
         dex_programs = {
             "JUP6LkbZbjS1jKKwapdHNyMrzcTRT5VqkmzV3GowrN5",  # Jupiter v6
             "JUP4Fb2cqiRUcaFhDHkTVvH2jVGLu4K1J6bF9Q4XJ3",   # Jupiter v4
@@ -94,7 +121,24 @@ class WalletScorer:
             "6EF8rrecthR5Dkzon8Nwu78hRvfCKubJ14M5uBEwF6P",  # Pump.fun
             "pAMMBayHd5GJK9DHN7h8p5x3qGmwCcrkN9ZdY5K3L6",   # PumpSwap
         }
-        return bool(progs & dex_programs)
+
+        for ix in instructions:
+            prog_id = ix.get("programId", "")
+            if prog_id in dex_programs:
+                return True
+
+        # Fallback: if there are token balance changes, it's likely a swap
+        if pre_balances and post_balances:
+            for pre in pre_balances:
+                for post in post_balances:
+                    if (pre.get("accountIndex") == post.get("accountIndex") and
+                        pre.get("mint") == post.get("mint")):
+                        pre_amt = pre.get("uiTokenAmount", {}).get("uiAmount", 0) or 0
+                        post_amt = post.get("uiTokenAmount", {}).get("uiAmount", 0) or 0
+                        if abs(post_amt - pre_amt) > 0:
+                            return True
+
+        return False
 
     # ── CORE: PARSE TRADE FROM TX ──
 

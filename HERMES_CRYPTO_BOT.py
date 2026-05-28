@@ -55,6 +55,7 @@ try:
     from wallet_scorer import WalletScorer, init_wallet_scorer
     from wallet_discovery import WalletDiscovery, init_wallet_discovery
     from copy_trader_v2 import CopyEngine
+    from wallet_leaderboard import get_mirrors
     WALLET_SCORER_OK = True
 except ImportError as e:
     WALLET_SCORER_OK = False
@@ -2071,19 +2072,21 @@ async def main():
 
     # After wallet init, run wallet discovery if no tracked wallets
     if WALLET_SCORER_OK and copy_engine and not copy_engine.tracked_wallets:
-        logger.info("🔍 No tracked wallets — running discovery...")
+        logger.info("🔍 No tracked wallets — loading from leaderboard...")
         try:
-            scored = await discovery.run_discovery_cycle()
-            mirrors = discovery.get_top_mirrors(n=3)
+            mirrors = get_mirrors(min_pnl=50.0, min_win_rate=0.50)
             if mirrors:
                 await copy_engine.set_tracked_wallets(mirrors)
-                logger.info(f"🐋 Now mirroring {len(mirrors)} wallets")
+                logger.info(f"🐋 Now mirroring {len(mirrors)} wallets from leaderboard")
                 for m in mirrors:
-                    logger.info(f"   → {m['wallet'][:20]}... | Score: {m.get('composite_score', 0):.1f} | PnL: {m.get('total_pnl_sol', 0):+.4f} SOL")
+                    logger.info(
+                        f"   → {m['name']} | {m['wallet'][:20]}... | "
+                        f"Score: {m['tier']} | PnL: +{m['pnl_30d_sol']:.1f} SOL | WinRate: {m['win_rate']:.0%}"
+                    )
             else:
-                logger.warning("Discovery found no MIRROR-grade wallets")
+                logger.warning("Leaderboard has no MIRROR-grade wallets")
         except Exception as e:
-            logger.warning(f"Discovery cycle failed: {e}")
+            logger.warning(f"Leaderboard load failed: {e}")
 
     if alerts:
         try:

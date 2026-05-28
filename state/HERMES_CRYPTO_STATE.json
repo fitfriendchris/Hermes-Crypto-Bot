@@ -1,5 +1,5 @@
 {
-  "balance": 83.27,
+  "balance": 83.35,
   "positions": {
     "UGLYFUCK": {
       "token": "UGLYFUCK",
@@ -56,17 +56,30 @@
       "highest_price": 0.03339832647665691,
       "portion": 1.0,
       "timestamp": "2026-05-23T04:10:02.594012+00:00"
+    },
+    {
+      "token": "Snow",
+      "entry": 4.188e-05,
+      "exit": 4.333e-06,
+      "invested": 2.5,
+      "proceeds": 0.2586556829035339,
+      "pnl": -2.4038443170964663,
+      "pnl_pct": -0.9615377268385865,
+      "reason": "stop_loss_fixed",
+      "hold_time_hours": 0.0,
+      "highest_price": 4.188e-05,
+      "portion": 1.0
     }
   ],
-  "daily_pnl": 0.0,
-  "weekly_pnl": -4.995,
-  "trades_today": 1,
-  "consecutive_losses": 1,
+  "daily_pnl": -2.4038443170964663,
+  "weekly_pnl": -7.398844317096467,
+  "trades_today": 2,
+  "consecutive_losses": 2,
   "max_drawdown": 0.16077657773400972,
   "total_protected": 0,
   "halt_entries_until": null,
   "halt_reason": "",
-  "day_start_balance": 83.27,
-  "week_start_balance": 83.27,
-  "timestamp": "2026-05-27T21:06:49.664013"
+  "day_start_balance": 83.35,
+  "week_start_balance": 83.35,
+  "timestamp": "2026-05-27T21:09:50.655561"
 }

@@ -22,11 +22,14 @@ logger = logging.getLogger('CryptoBot')
 SOLSCAN_API = "https://public-api.solscan.io"
 HELIUS_RPC = "https://mainnet.helius-rpc.com/?api-key=1b648949-7c0e-4167-aaf2-3f7ad6d90e15"
 
-# Known profitable wallets as seeds (public, verifiable)
-# These are wallets that have demonstrated consistent profitability
+# Known profitable wallets as seeds (public, from Subglow 30d leaderboard)
+# Verified 2026-05-27: All wallets show positive 30d realized PnL on kolscan.io
 SEED_WALLETS = [
-    # Add known good wallets here as you discover them
-    # "ABC123...",  # Example: wallet that 10x'd on recent memecoin
+    "CyaE1VxvBrahnPWkqm5VsdCvyS2QmNht2UFrKJHga54o",  # #1 | +4954 SOL | Centedcya
+    "Bi4rd5FH5bYEN8scZ7wevxNZyNmKHdaBcvewdPFxYdLt",  # #2 | +3219 SOL | theo
+    "525LueqAyZJueCoiisfWy6nyh4MTvmF4X9jSqi6efXJT",  # #3 | +1503 SOL | Joji
+    "4BdKaxN8G6ka4GYtQQWk4G4dZRUTX2vQH9GcXdBREFUk",  # #4 | +1331 SOL | Jijo
+    "4vw54BmAogeRV3vPKWyFet5yf8DTLcREzdSzx4rw9Ud9",  # #5 | +1253 SOL | decu
 ]
 
 # File to persist discovered wallets

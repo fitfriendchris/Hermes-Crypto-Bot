@@ -2053,6 +2053,8 @@ async def copy_trader_v2_loop():
                     'info': {'socials': ['verified_wallet'], 'websites': ['verified_wallet']},
                 }
 
+                logger.info(f"🐋 COPY EVAL: {token_dict['symbol']} | Mint: {token_mint[:20]}... | Mode: {get_mode()}")
+
                 # Get price from Jupiter quote
                 try:
                     async with aiohttp.ClientSession() as price_session:
@@ -2079,6 +2081,7 @@ async def copy_trader_v2_loop():
                 # Now run through main entry evaluation
                 pos = await evaluate_entry(token_dict)
                 if not pos:
+                    logger.debug(f"Copy entry eval returned None for {token_dict.get('symbol', '?')}")
                     continue
 
                 # Override with copy-specific sizing

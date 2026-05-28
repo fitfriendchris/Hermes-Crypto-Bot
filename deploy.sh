@@ -14,6 +14,7 @@ echo "⏳ Checking Python syntax..."
 python3 -c "import ast; ast.parse(open('HERMES_CRYPTO_BOT.py').read())"
 python3 -c "import ast; ast.parse(open('high_attention_scalper.py').read())"
 python3 -c "import ast; ast.parse(open('symbol_filter.py').read())"
+python3 -c "import ast; ast.parse(open('wallet_reader.py').read())"
 echo "✅ Syntax OK"
 
 # 2. Kill old bot
@@ -22,17 +23,23 @@ pkill -f "HERMES_CRYPTO_BOT.py" 2> /dev/null || true
 sleep 2
 echo "✅ Old bot stopped"
 
-# 3. Fix state balance (prevent sync issues)
+# 3. Read real wallet balance + fix state
+echo "⏳ Reading real wallet balance..."
+BALANCE_JSON=$(python3 wallet_reader.py 2>/dev/null || echo '{"sol_usd_value":90.78}')
+REAL_BALANCE=$(echo "$BALANCE_JSON" | python3 -c "import sys,json; d=json.load(sys.stdin); print(d.get('sol_usd_value',90.78))")
+echo "✅ Real wallet: \$${REAL_BALANCE}"
+
 echo "⏳ Fixing state..."
-python3 << 'PYEOF'
+python3 << PYEOF
 import json, os
 state_path = 'state/HERMES_CRYPTO_STATE.json'
+real_balance = ${REAL_BALANCE}
 if os.path.exists(state_path):
     with open(state_path) as f:
         s = json.load(f)
-    s['balance'] = 90.78
-    s['day_start_balance'] = 90.78
-    s['week_start_balance'] = 90.78
+    s['balance'] = real_balance
+    s['day_start_balance'] = real_balance
+    s['week_start_balance'] = real_balance
     s['halt_entries_until'] = None
     s['halt_reason'] = ''
     with open(state_path, 'w') as f:
@@ -40,8 +47,9 @@ if os.path.exists(state_path):
 PYEOF
 echo "✅ State fixed"
 
-# 4. Start bot
+# 4. Start bot with LIVE_MODE
 echo "⏳ Starting bot..."
+export LIVE_MODE=true
 nohup python3 HERMES_CRYPTO_BOT.py >> logs/HERMES_CRYPTO_BOT.log 2>&1 &
 echo "✅ Bot started (PID: $!)"
 sleep 5
@@ -58,7 +66,7 @@ else
 Bot: Hermes Crypto Bot v2.0 ULTRA
 Mode: HIGH_ATTENTION
 Status: LIVE
-Balance: \$90.78"
+Balance: \$${REAL_BALANCE}"
     
     git commit -m "$MSG"
     git push origin main
@@ -72,6 +80,6 @@ echo "🚀 DEPLOY COMPLETE"
 echo "================"
 echo "Bot: LIVE"
 echo "Mode: HIGH_ATTENTION"
-echo "Balance: \$90.78"
+echo "Balance: \$${REAL_BALANCE}"
 echo "GitHub: fitfriendchris/Hermes-Crypto-Bot"
 echo "Log: tail -f logs/HERMES_CRYPTO_BOT.log"

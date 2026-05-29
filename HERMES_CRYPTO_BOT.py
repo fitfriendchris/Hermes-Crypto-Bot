@@ -22,26 +22,18 @@ _HERE = os.path.dirname(os.path.abspath(__file__))
 sys.path.insert(0, _HERE)
 
 # ── Optional module imports ──
-try:
-    from launch_sniper import evaluate_launch, init_launch_sniper
-    SNIPER_OK = True
-except ImportError as e:
-    SNIPER_OK = False
-    print(f"[WARN] Launch sniper unavailable: {e}")
+# ── DISABLED MODULES (caused catastrophic losses) ──
+SNIPER_OK = False
+MOMENTUM_OK = False
+HIGH_ATTENTION_OK = False
 
+# ── ACTIVE MODULES ──
 try:
     from anti_rug_suite import run_full_rug_check, init_anti_rug
     ANTIRUG_OK = True
 except ImportError as e:
     ANTIRUG_OK = False
     print(f"[WARN] Anti-rug suite unavailable: {e}")
-
-try:
-    from momentum_scanner import evaluate_momentum, evaluate_momentum_fast, init_momentum_scanner
-    MOMENTUM_OK = True
-except ImportError as e:
-    MOMENTUM_OK = False
-    print(f"[WARN] Momentum scanner unavailable: {e}")
 
 try:
     from copy_trader import evaluate_copy_signal, init_copy_trader, scan_whale_wallets
@@ -107,15 +99,23 @@ except ImportError as e:
     BRAIN_OK = False
     print(f"[WARN] LLM brain unavailable: {e}")
 
-try:
-    from high_attention_scalper import (
-        init_high_attention, scan_high_attention, discover_high_attention,
-        evaluate_high_attention, HighAttentionEngine
-    )
-    HIGH_ATTENTION_OK = True
-except ImportError as e:
-    HIGH_ATTENTION_OK = False
-    print(f"[WARN] High-attention scalper unavailable: {e}")
+# DISABLED: High-attention scalper removed — caused catastrophic losses
+# try:
+#     from high_attention_scalper import (
+#         init_high_attention, scan_high_attention, discover_high_attention,
+#         evaluate_high_attention, HighAttentionEngine
+#     )
+#     HIGH_ATTENTION_OK = True
+# except ImportError as e:
+#     HIGH_ATTENTION_OK = False
+#     print(f"[WARN] High-attention scalper unavailable: {e}")
+HIGH_ATTENTION_OK = False
+
+# DISABLED: Sniper removed
+SNIPER_OK = False
+
+# DISABLED: Momentum scanner removed
+MOMENTUM_OK = False
 
 # Mode state machine — single source of truth for active strategy
 from bot_mode import (
@@ -2095,10 +2095,19 @@ async def copy_trader_v2_loop():
                 }
 
                 _block_reentry(pos['token'])
-                if LIVE_MODE and wallet_ready:
-                    await live_buy(pos)
-                else:
-                    await paper_buy(pos)
+                
+                # FORCE execution regardless of wallet state
+                # Copy trades should ALWAYS execute (paper if not live, live if ready)
+                try:
+                    if LIVE_MODE and wallet_ready:
+                        await live_buy(pos)
+                        logger.info(f"🐋 COPY LIVE BUY: {pos['token']}")
+                    else:
+                        await paper_buy(pos)
+                        logger.info(f"🐋 COPY PAPER BUY: {pos['token']}")
+                except Exception as e:
+                    logger.error(f"💥 COPY BUY FAILED: {e}")
+                    continue
 
                 logger.info(
                     f"🐋 COPY EXECUTED: {pos['token']} | ${pos['invested']:.2f} | "
@@ -2286,37 +2295,17 @@ async def main():
     if dex:
         await dex.initialize()
 
-    # Initialize anti-rug suite
-    if ANTIRUG_OK:
-        await init_anti_rug()
-        logger.info("🛡️ Anti-rug suite: ACTIVE")
-
-    # Initialize launch sniper
-    if SNIPER_OK:
-        await init_launch_sniper()
-        logger.info("🎯 Launch sniper: ACTIVE")
-
-    # Initialize momentum scanner
-    if MOMENTUM_OK:
-        await init_momentum_scanner()
-        logger.info("📈 Momentum scanner: ACTIVE")
-
-    # Initialize copy trader
+    # Initialize copy trader ONLY — no sniper, no high-attention
     if COPY_OK:
         await init_copy_trader()
         logger.info("🐋 Copy trader: ACTIVE")
 
-    # Initialize new wallet scoring + discovery
+    # Initialize wallet scoring + discovery
     if WALLET_SCORER_OK and scorer:
         await scorer.initialize()
         await discovery.initialize()
         await copy_engine.initialize()
         logger.info("📊 Wallet scorer + discovery + copy engine: ACTIVE")
-
-    # Initialize high-attention scalper
-    if HIGH_ATTENTION_OK:
-        await init_high_attention()
-        logger.info("🔥 High-attention scalper: ACTIVE")
 
     await init_wallet()
 
@@ -2361,7 +2350,7 @@ async def main():
 
     tasks = [
         asyncio.create_task(copy_trader_v2_loop()),  # ONLY copy trading — verified wallets
-        asyncio.create_task(monitor_loop()),
+        asyncio.create_task(monitor_loop()),           # Position exits only
         asyncio.create_task(report_loop()),
         asyncio.create_task(save_loop()),
         asyncio.create_task(daily_report_loop()),
